@@ -1,0 +1,50 @@
+{
+  "name": "hye",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "dependencies": {
+    "@expo/vector-icons": "^15.0.2",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~58.0.19",
+    "expo-clipboard": "~58.0.4",
+    "expo-constants": "~58.0.13",
+    "expo-document-picker": "~58.0.4",
+    "expo-file-system": "~58.0.11",
+    "expo-image": "~58.0.17",
+    "expo-linking": "~58.0.14",
+    "expo-router": "~58.0.26",
+    "expo-sharing": "~58.0.20",
+    "expo-status-bar": "~58.0.4",
+    "fflate": "^0.8.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-native": "0.88.0",
+    "react-native-safe-area-context": "~5.10.1",
+    "react-native-screens": "~4.30.0",
+    "react-native-web": "^0.21.4"
+  },
+  "devDependencies": {
+    "@types/jest": "30.0.0",
+    "@types/react": "~19.3.0",
+    "jest": "~30.5.2",
+    "jest-expo": "~58.0.12",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "phone": "adb reverse tcp:8081 tcp:8081 && expo start --android --localhost",
+    "web": "expo start --web",
+    "test": "jest",
+    "typecheck": "tsc --noEmit",
+    "lint": "expo lint"
+  },
+  "private": true,
+  "jest": {
+    "preset": "jest-expo",
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/.claude/"
+    ]
+  }
+}
