@@ -1,7 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { Screen } from '@/components/Screen';
@@ -9,7 +9,7 @@ import { Banner, Button, Card, Chip, Divider, EmptyState, Row, SectionTitle, Tag
 import { ArchiveFile, ImportPreview, migrationReport, PlannedItem, planImport, runImportBatch, WHATSAPP_NOT_PRESERVED } from '@/domain/import/pipeline';
 import { DateOrder, recordTimestamp } from '@/domain/import/whatsapp';
 import type { Conversation, ImportJob } from '@/domain/types';
-import { INTEGRATIONS } from '@/integrations/catalog';
+import { INTEGRATIONS, STATUS_COPY } from '@/integrations/catalog';
 import {
   analyse, Analysis, buildPreview, existingConversation, existingKeys, ImportError, loadExport, LoadedExport, newJob, persistExport, reloadExport, writeShareFile,
 } from '@/services/importer';
@@ -38,12 +38,17 @@ export default function ImportScreen() {
   stateRef.current = state;
 
   const job = state.importJobs.find(j => j.id === jobId) ?? null;
-  const built = loaded && analysis && order ? buildPreview(state, analysis, loaded, order, me) : null;
+  // Preview depends on the chosen file and options, not on every store change (e.g. import batches).
+  const built = useMemo(
+    () => (loaded && analysis && order && step === 'review' ? buildPreview(stateRef.current, analysis, loaded, order, me) : null),
+    [loaded, analysis, order, me, step],
+  );
 
   // Leaving the screen mid-import pauses it; it can be resumed from the history list.
   useEffect(() => () => { pauseRef.current = true; }, []);
 
-  const persistSoon = () => new Promise<void>(r => setTimeout(r, 60)).then(flush).catch(() => undefined);
+  /** Waits for the dispatched batch to render into the store, then writes it. Rejects if saving fails. */
+  const persistSoon = () => new Promise<void>(r => setTimeout(r, 60)).then(flush);
 
   const pick = async () => {
     const res = await DocumentPicker.getDocumentAsync({ type: ['text/plain', 'application/zip', 'application/x-zip-compressed', '*/*'], copyToCacheDirectory: true });
@@ -72,22 +77,30 @@ export default function ImportScreen() {
       if (pauseRef.current) {
         j = { ...j, status: 'paused' };
         dispatch({ type: 'upsertImportJob', job: j });
-        await persistSoon();
+        await persistSoon().catch(() => undefined);
         return;
       }
       const out = runImportBatch(j, plan, keys, BATCH);
       dispatch({ type: 'addMessages', messages: out.newMessages, touch: false });
       j = out.job;
       dispatch({ type: 'upsertImportJob', job: j });
-      await persistSoon();
+      try {
+        await persistSoon();
+      } catch {
+        // Don't report success on top of data that isn't saved; pause so it can resume later.
+        dispatch({ type: 'upsertImportJob', job: { ...j, status: 'paused' } });
+        setError('We couldn’t save the imported messages. Free up some space on your phone, then resume the import from Import history.');
+        setStep('error');
+        return;
+      }
     }
     const times = plan.filter(p => p.message).map(p => p.message!.sentAt).sort();
     const conv = stateRef.current.conversations.find(c => c.id === j.conversationId);
     if (conv && times.length && times[times.length - 1] > conv.lastActivityAt) {
       dispatch({ type: 'patchConversation', id: conv.id, patch: { lastActivityAt: times[times.length - 1] } });
     }
-    audit('import.completed', `${j.fileName}: ${j.imported} imported, ${j.skipped} skipped, ${j.failed} failed`);
-    await persistSoon();
+    audit('import.completed', `${j.imported} imported, ${j.skipped} skipped, ${j.failed} failed`);
+    await persistSoon().catch(() => undefined);
     setStep('done');
   };
 
@@ -126,7 +139,7 @@ export default function ImportScreen() {
   const resume = async (j: ImportJob, retryOrder?: DateOrder) => {
     setJobId(j.id);
     setStep('importing');
-    const saved = await reloadExport(j.id);
+    const saved = await reloadExport(j.id, j.fileName);
     if (!saved) {
       setError('The original export is no longer on this device. Choose the file again to continue — anything already imported will be skipped.');
       setStep('error');
@@ -168,7 +181,7 @@ export default function ImportScreen() {
             return (
               <View key={i.platform}>
                 {idx > 0 ? <Divider /> : null}
-                <Row label={i.name} detail={ready ? 'Chat export (.txt or .zip)' : cap.note} right={<Tag label={ready ? 'Available' : 'Coming soon'} tone={ready ? 'success' : 'muted'} />} onPress={ready ? () => setStep('guide') : undefined} />
+                <Row label={i.name} detail={ready ? 'Chat export (.txt or .zip)' : cap.note} right={<Tag label={STATUS_COPY[cap.status].label} tone={STATUS_COPY[cap.status].tone} />} onPress={ready ? () => setStep('guide') : undefined} />
               </View>
             );
           })}
@@ -206,7 +219,7 @@ export default function ImportScreen() {
         <Card style={styles.steps}>
           {WHATSAPP_NOT_PRESERVED.map(s => <Txt key={s} variant="small">• {s}</Txt>)}
         </Card>
-        <Banner icon="lock-closed-outline" title="Your file stays on this phone" body="It’s read and stored only on this device. Imported history isn’t end-to-end encrypted by hye, and it doesn’t sync back to WhatsApp." />
+        <Banner icon="lock-closed-outline" title="hye never uploads your file" body="It’s read and stored in hye on this device. Android backups exclude it; on iPhone, your device backup may include app data. Imported history isn’t end-to-end encrypted by hye, and it doesn’t sync back to WhatsApp." />
         <Button label="Choose export file" icon="document-attach-outline" onPress={pick} />
       </Screen>
     );
@@ -297,8 +310,8 @@ export default function ImportScreen() {
             <View style={[styles.fill, { backgroundColor: colors.accent, width: `${pct}%` }]} />
           </View>
           <Txt color="textMuted">{job ? `${job.cursor.toLocaleString()} of ${job.total.toLocaleString()} · ${job.imported} imported · ${job.skipped} skipped · ${job.failed} failed` : 'Saving files…'}</Txt>
-          <Txt variant="small" color="textMuted" style={{ textAlign: 'center' }}>You can leave this screen. The import pauses and you can resume it later without duplicates.</Txt>
-          <Button label="Pause" variant="secondary" onPress={() => { pauseRef.current = true; router.back(); }} />
+          <Txt variant="small" color="textMuted" style={{ textAlign: 'center' }}>Leaving this screen pauses the import. Resume it any time from Import history. Nothing is imported twice.</Txt>
+          <Button label="Pause and leave" variant="secondary" onPress={() => { pauseRef.current = true; router.back(); }} />
         </View>
       </Screen>
     );
@@ -314,7 +327,7 @@ export default function ImportScreen() {
       <Banner
         icon={job.failed ? 'alert-circle-outline' : 'checkmark-circle-outline'}
         tone={job.status !== 'completed' ? 'warning' : job.failed ? 'warning' : 'info'}
-        title={job.status === 'completed' ? (job.failed ? 'Imported with some problems' : 'Import complete') : `Import ${job.status}`}
+        title={job.status === 'completed' ? (job.failed ? 'Imported with some problems' : 'Import complete') : job.status === 'paused' ? 'Import paused – resume to finish' : job.status === 'importing' ? 'Import in progress' : 'Import didn’t finish'}
         body={`${job.fileName} · ${formatDateTime(job.createdAt)}`}
       />
       <View style={styles.stats}>
@@ -331,7 +344,7 @@ export default function ImportScreen() {
           <View style={styles.wrap}>{altOrders.map(o => <Chip key={o} label={{ DMY: 'Day/Month/Year', MDY: 'Month/Day/Year', YMD: 'Year-Month-Day' }[o]} onPress={() => resume(job, o)} />)}</View>
         </Card>
       ) : null}
-      <Button label="Save report (JSON)" variant="secondary" icon="share-outline" onPress={() => shareReport(job)} />
+      <Button label="Save import report" variant="secondary" icon="share-outline" onPress={() => shareReport(job)} />
       {issues.length ? (
         <>
           <SectionTitle>{`Skipped and failed · ${job.results.length}`}</SectionTitle>
@@ -339,7 +352,7 @@ export default function ImportScreen() {
             {issues.map((r, i) => (
               <View key={`${r.ref}-${i}`}>
                 {i > 0 ? <Divider /> : null}
-                <Row label={r.ref} detail={r.reason} right={<Tag label={r.outcome} tone={r.outcome === 'failed' ? 'danger' : 'muted'} />} />
+                <Row label={r.ref} detail={r.reason} right={<Tag label={r.outcome === 'failed' ? 'Failed' : 'Skipped'} tone={r.outcome === 'failed' ? 'danger' : 'muted'} />} />
               </View>
             ))}
           </Card>

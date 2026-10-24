@@ -92,7 +92,11 @@ export default function NewChat() {
       </Card>
       <Txt variant="small" color="textMuted">The prototype includes simulated demo contacts so you can try chats. Finding real people by username needs the hye server.</Txt>
       {mode === 'group' ? (
-        <Button label={picked.length ? `Create group with ${picked.length} ${picked.length === 1 ? 'person' : 'people'}` : 'Pick at least one person'} disabled={!picked.length || !title.trim()} onPress={createGroup} />
+        <Button
+          label={!picked.length ? 'Pick at least one person' : !title.trim() ? 'Add a group name' : `Create group with ${picked.length} ${picked.length === 1 ? 'person' : 'people'}`}
+          disabled={!picked.length || !title.trim()}
+          onPress={createGroup}
+        />
       ) : null}
     </Screen>
   );

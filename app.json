@@ -3,7 +3,7 @@
     "name": "hye",
     "slug": "hye",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
@@ -18,7 +18,8 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "io.hash8.hye"
+      "package": "io.hash8.hye",
+      "allowBackup": false
     },
     "web": {
       "favicon": "./assets/favicon.png"

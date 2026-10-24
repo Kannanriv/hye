@@ -93,7 +93,7 @@ export const INTEGRATIONS: IntegrationInfo[] = [
     summary: 'Email is open by design. Gmail and Microsoft accounts can connect with OAuth, so we never see your password.',
     capabilities: [
       { label: 'Inbox (Gmail, Outlook)', status: 'planned', note: 'OAuth with read scopes you approve; needs the hye backend.' },
-      { label: 'Other providers (IMAP)', status: 'planned', note: 'App passwords only, stored encrypted, revocable any time.' },
+      { label: 'Other providers (IMAP)', status: 'unavailable', note: 'Only providers with OAuth sign-in. We won’t ask for any email password, including app passwords.' },
     ],
     alternatives: ['Forward important emails to yourself in hye'],
   },

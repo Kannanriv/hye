@@ -11,7 +11,7 @@ import type { PrivacySettings, RetentionPolicy } from '@/domain/types';
 import { deleteImportFiles, writeShareFile } from '@/services/importer';
 import { useStore } from '@/state/store';
 import { space } from '@/theme/tokens';
-import { RETENTION_LABEL } from '@/utils/labels';
+import { auditLabel, RETENTION_LABEL } from '@/utils/labels';
 import { formatDateTime } from '@/utils/time';
 
 export default function SettingsPage() {
@@ -38,7 +38,7 @@ function Privacy() {
   return (
     <Screen title="Privacy" back>
       <Card>
-        <ToggleRow label="Read receipts" detail="If off, you won’t send or see blue ticks" value={p.readReceipts} onChange={v => set({ readReceipts: v })} />
+        <ToggleRow label="Read receipts" detail="When off, others won’t see when you’ve read their messages, and you won’t see when they’ve read yours" value={p.readReceipts} onChange={v => set({ readReceipts: v })} />
         <Divider />
         <ToggleRow label="Typing indicators" detail="Show and see when someone is typing" value={p.typingIndicators} onChange={v => set({ typingIndicators: v })} />
       </Card>
@@ -48,6 +48,7 @@ function Privacy() {
           <Chip key={v} label={{ everyone: 'Everyone', contacts: 'My contacts', nobody: 'Nobody' }[v]} selected={p.lastSeen === v} onPress={() => set({ lastSeen: v })} />
         ))}
       </View>
+      <Txt variant="small" color="textMuted">Saved now. Online status arrives with the hye server; until then nobody can see it.</Txt>
       <SectionTitle>Default message timer for new chats</SectionTitle>
       <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
         {(Object.keys(RETENTION_LABEL) as RetentionPolicy[]).map(r => (
@@ -58,7 +59,7 @@ function Privacy() {
       <Banner
         icon="key-outline"
         title="About encryption"
-        body="In this prototype, messages are stored on your device and never leave it. End-to-end encryption for hye-to-hye chats is part of the server design. Imported history is a copy of your export and is not end-to-end encrypted by hye."
+        body="In this prototype, hye stores messages on this device and never uploads them. Files you choose to export or share do leave the device. End-to-end encryption for hye-to-hye chats is part of the server design. Imported history is a copy of your export and is not end-to-end encrypted by hye."
       />
     </Screen>
   );
@@ -147,7 +148,7 @@ function Activity() {
           {state.audit.map((e, i) => (
             <View key={e.id}>
               {i > 0 ? <Divider /> : null}
-              <Row label={e.action} detail={`${e.detail} · ${formatDateTime(e.at)}`} right={<View />} />
+              <Row label={auditLabel(e.action)} detail={`${e.detail} · ${formatDateTime(e.at)}`} right={<View />} />
             </View>
           ))}
         </Card>
@@ -157,7 +158,7 @@ function Activity() {
 }
 
 function YourData() {
-  const { state, dispatch, audit } = useStore();
+  const { state, dispatch, audit, wipeAll } = useStore();
   const [confirmImports, setConfirmImports] = useState(false);
   const [confirmAccount, setConfirmAccount] = useState(false);
   const [typed, setTyped] = useState('');
@@ -166,10 +167,11 @@ function YourData() {
 
   const exportAll = async () => {
     const data = { format: 'hye-export/1', exportedAt: new Date().toISOString(), ...state };
-    const uri = await writeShareFile(`hye-export-${Date.now()}.json`, data);
-    audit('data.exported', `${state.messages.length} messages, ${state.conversations.length} conversations`);
-    if (uri && (await Sharing.isAvailableAsync())) await Sharing.shareAsync(uri, { mimeType: 'application/json', dialogTitle: 'Save your hye data' });
-    else setStatus('Export created. Sharing isn’t available here, so open the app on your phone to save it.');
+    const uri = await writeShareFile(`hye-export-${Date.now()}.json`, data).catch(() => null);
+    if (!uri) return setStatus('We couldn’t create the export file. Free up some space and try again.');
+    audit('data.exported', `${state.messages.length} messages, ${state.conversations.length} chats`);
+    if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'application/json', dialogTitle: 'Save your hye data' });
+    else setStatus('Export saved, but this device can’t open the share menu.');
   };
 
   return (
@@ -182,7 +184,7 @@ function YourData() {
       </Card>
       <SectionTitle>Imported history</SectionTitle>
       <Card style={{ padding: space.lg, gap: space.md }}>
-        <Txt>{importedConvs.length} imported conversation{importedConvs.length === 1 ? '' : 's'}. Removing them doesn’t affect the original apps.</Txt>
+        <Txt>{importedConvs.length} imported chat{importedConvs.length === 1 ? '' : 's'}. Removing them doesn’t affect the original apps.</Txt>
         <Button label="Delete all imported history" variant="secondary" disabled={!importedConvs.length} onPress={() => setConfirmImports(true)} />
       </Card>
       <SectionTitle>Delete account</SectionTitle>
@@ -194,15 +196,16 @@ function YourData() {
       <ConfirmDialog
         visible={confirmImports}
         title="Delete imported history?"
-        body={`${importedConvs.length} conversations and their files will be removed from hye.`}
-        confirmLabel="Delete"
+        body={`${importedConvs.length} imported ${importedConvs.length === 1 ? 'chat' : 'chats'} and their files will be deleted from hye. Originals in other apps aren’t affected. This can’t be undone.`}
+        confirmLabel="Delete imported history"
         destructive
         onCancel={() => setConfirmImports(false)}
         onConfirm={() => {
           importedConvs.forEach(c => dispatch({ type: 'deleteConversation', id: c.id }));
           deleteImportFiles();
-          audit('imports.deleted', `${importedConvs.length} conversations`);
+          audit('imports.deleted', `${importedConvs.length} chats`);
           setConfirmImports(false);
+          setStatus('Imported history deleted.');
         }}
       />
       <ConfirmDialog
@@ -214,8 +217,7 @@ function YourData() {
         confirmDisabled={typed.trim().toUpperCase() !== 'DELETE'}
         onCancel={() => { setConfirmAccount(false); setTyped(''); }}
         onConfirm={() => {
-          deleteImportFiles();
-          dispatch({ type: 'reset' });
+          wipeAll().catch(() => setStatus('Some data couldn’t be erased. Try again, or uninstall the app to remove everything.'));
         }}
       >
         <TextField label="Type DELETE to confirm" value={typed} onChangeText={setTyped} autoCapitalize="characters" />

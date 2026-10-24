@@ -16,7 +16,7 @@ export default function IntegrationScreen() {
     <Screen title={info.name} back>
       <Txt color="textMuted">{info.summary}</Txt>
       {canImport ? <Button label="Import a chat" icon="download-outline" onPress={() => router.push('/import')} /> : (
-        <Banner icon="time-outline" title="Not connectable yet" body="Nothing here works in the prototype yet. Statuses describe what the official APIs allow." />
+        <Banner icon="time-outline" title="Not connected in this prototype" body="hye has no server yet, so nothing here works today. Each status shows what the platform’s official API allows." />
       )}
       <SectionTitle>What’s possible</SectionTitle>
       <Card>

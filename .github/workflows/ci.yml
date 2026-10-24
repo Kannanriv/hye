@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs for the same branch / PR.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    name: App (Expo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test -- --ci
+
+      - name: Expo Doctor (non-blocking)
+        continue-on-error: true
+        run: npx expo-doctor
+
+      - name: Export Android bundle
+        run: npx expo export --platform android --output-dir dist-android
+
+  # hashFiles() is not available in a job-level `if`, and needs a checkout,
+  # so detect the backend in a tiny job and gate the backend job on its output.
+  detect-backend:
+    name: Detect backend
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: backend/package.json
+          sparse-checkout-cone-mode: false
+      - id: check
+        run: echo "exists=${{ hashFiles('backend/package.json') != '' }}" >> "$GITHUB_OUTPUT"
+
+  backend:
+    name: Backend (NestJS)
+    needs: detect-backend
+    # Only runs once backend/package.json exists in the repo.
+    if: ${{ needs.detect-backend.outputs.exists == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgres://hye:hye@localhost:5432/hye_test
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: hye
+      PGPASSWORD: hye
+      PGDATABASE: hye_test
+      REDIS_URL: redis://localhost:6379
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hye
+          POSTGRES_PASSWORD: hye
+          POSTGRES_DB: hye_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hye -d hye_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run migrations (backend/db/migrations)
+        run: npm run migrate
+
+      - name: Tests
+        run: npm test -- --ci

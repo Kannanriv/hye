@@ -29,7 +29,7 @@ export default function Welcome() {
   const errors = {
     name: name.trim().length < 2 ? 'Enter at least 2 characters' : undefined,
     handle: !/^[a-z0-9_]{3,20}$/.test(handle) ? '3–20 lowercase letters, numbers or _' : undefined,
-    email: !/^\S+@\S+\.\S+$/.test(email.trim()) ? 'Enter an email like name@example.com' : undefined,
+    email: email.trim() && !/^\S+@\S+\.\S+$/.test(email.trim()) ? 'Enter an email like name@example.com, or leave it empty' : undefined,
   };
   const valid = !errors.name && !errors.handle && !errors.email;
 
@@ -60,6 +60,7 @@ export default function Welcome() {
                   </View>
                 ))}
               </View>
+              <Banner icon="phone-portrait-outline" title="This is a demo" body="Your account and messages stay on this device, and the contacts you’ll see are simulated so you can try chatting. The full version signs you in with a passkey." />
               <Button label="Get started" onPress={() => setStep('account')} />
             </>
           ) : (
@@ -67,8 +68,8 @@ export default function Welcome() {
               <Txt variant="heading">Create your account</Txt>
               <TextField label="Your name" value={name} onChangeText={setName} placeholder="How people will see you" autoComplete="name" error={tried ? errors.name : undefined} />
               <TextField label="Username" value={handle} onChangeText={t => setHandle(t.toLowerCase())} placeholder="e.g. kannan" autoCapitalize="none" autoCorrect={false} error={tried ? errors.handle : undefined} />
-              <TextField label="Email" value={email} onChangeText={setEmail} placeholder="name@example.com" autoCapitalize="none" keyboardType="email-address" autoComplete="email" error={tried ? errors.email : undefined} />
-              <Banner icon="phone-portrait-outline" title="Demo mode" body="Your account and messages stay on this device. The full version signs you in with a passkey instead of a password." />
+              <TextField label="Email (optional)" value={email} onChangeText={setEmail} placeholder="name@example.com" autoCapitalize="none" keyboardType="email-address" autoComplete="email" error={tried ? errors.email : undefined} />
+              <Txt variant="caption" color="textMuted">Only for account recovery once hye has a server. For now it stays on this device.</Txt>
               <Button label="Create account" onPress={create} />
               <Button label="Back" variant="ghost" onPress={() => setStep('intro')} />
             </>

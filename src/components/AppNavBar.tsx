@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { Tabs } from 'expo-router';
 import { ComponentProps, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { inboxRows, defaultFilters } from '@/state/selectors';
@@ -28,6 +28,9 @@ type BottomTabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tab
 
 export function AppNavBar({ state, descriptors, navigateToTab }: BottomTabBarProps) {
   const wide = useIsWide();
+  // Below 1100px an icon-only rail leaves room for the list and the open chat.
+  const { width } = useWindowDimensions();
+  const rail = wide && width < 1100;
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const store = useStore();
@@ -54,6 +57,7 @@ export function AppNavBar({ state, descriptors, navigateToTab }: BottomTabBarPro
         style={({ pressed }) => [
           compact ? styles.tab : styles.side,
           !compact && focused && { backgroundColor: colors.accentSoft },
+          rail && { justifyContent: 'center', paddingHorizontal: 0 },
           pressed && { opacity: 0.7 },
         ]}
       >
@@ -61,17 +65,19 @@ export function AppNavBar({ state, descriptors, navigateToTab }: BottomTabBarPro
           <Ionicons name={ICONS[name][focused ? 1 : 0]} size={compact ? 24 : 22} color={focused ? colors.accent : colors.textMuted} />
           {badge ? <View style={[styles.dot, { backgroundColor: colors.accent, borderColor: colors.surface }]} /> : null}
         </View>
-        <Txt variant={compact ? 'caption' : 'body'} color={focused ? 'accent' : 'textMuted'} style={{ fontWeight: focused ? '700' : '500' }}>
-          {label}
-        </Txt>
+        {rail ? null : (
+          <Txt variant={compact ? 'caption' : 'body'} color={focused ? 'accent' : 'textMuted'} style={{ fontWeight: focused ? '700' : '500' }}>
+            {label}
+          </Txt>
+        )}
       </Pressable>
     );
   };
 
   if (wide) {
     return (
-      <View style={[styles.sidebar, { backgroundColor: colors.surface, borderColor: colors.border, paddingTop: insets.top + space.lg }]}>
-        <Txt variant="title" color="accent" style={{ paddingHorizontal: space.md, marginBottom: space.lg }}>hye</Txt>
+      <View style={[rail ? styles.rail : styles.sidebar, { backgroundColor: colors.surface, borderColor: colors.border, paddingTop: insets.top + space.lg }]}>
+        <Txt variant="title" color="accent" style={{ paddingHorizontal: rail ? 0 : space.md, marginBottom: space.lg, textAlign: rail ? 'center' : 'left', fontSize: rail ? 20 : 28 }}>hye</Txt>
         {state.routes.map(r => item(r.name, false))}
       </View>
     );
@@ -102,6 +108,7 @@ const styles = StyleSheet.create({
   bar: { flexDirection: 'row', borderTopWidth: StyleSheet.hairlineWidth, paddingTop: space.sm },
   tab: { flex: 1, alignItems: 'center', gap: 2, minHeight: 48, justifyContent: 'center' },
   sidebar: { width: 220, borderRightWidth: StyleSheet.hairlineWidth, paddingHorizontal: space.sm, gap: 2 },
+  rail: { width: 72, borderRightWidth: StyleSheet.hairlineWidth, paddingHorizontal: space.sm, gap: 4, alignItems: 'stretch' },
   side: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, height: 44, borderRadius: 10 },
   dot: { position: 'absolute', top: -2, right: -4, width: 10, height: 10, borderRadius: 5, borderWidth: 2 },
   label: type.caption,

@@ -82,6 +82,18 @@ describe('ambiguity and bad input', () => {
     expect(recordTimestamp(p.records[0], 'DMY')).toBeNull();
   });
 
+  it('stays fast on hostile input (no catastrophic regex backtracking)', () => {
+    const hostile = `03/04/2026, 10:00 - A: ${' '.repeat(80_000)}x\n03/04/2026, 10:01 - B: ${'<attached:'.repeat(8_000)}`;
+    const start = Date.now();
+    parseWhatsAppExport(hostile);
+    expect(Date.now() - start).toBeLessThan(1000);
+  });
+
+  it('attributes WhatsApp’s encryption notice instead of presenting it as hye’s', () => {
+    const p = parseWhatsAppExport('24/10/2026, 09:15 - Messages and calls are end-to-end encrypted.');
+    expect(p.records[0].text).toMatch(/^WhatsApp said:/);
+  });
+
   it('returns nothing for a file that is not a WhatsApp export', () => {
     const p = parseWhatsAppExport('name,email\nfoo,bar@example.com');
     expect(p.records).toHaveLength(0);

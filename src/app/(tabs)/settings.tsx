@@ -46,7 +46,7 @@ export default function SettingsScreen() {
       ))}
       <SectionTitle>About this prototype</SectionTitle>
       <Txt variant="small" color="textMuted">
-        hye is running in demo mode. Everything is stored only on this device. Demo contacts are simulated, and integrations aren’t connected.
+        hye is running in demo mode. Your data is stored in hye on this device and hye never uploads it. Demo contacts are simulated, and integrations aren’t connected.
       </Txt>
     </Screen>
   );

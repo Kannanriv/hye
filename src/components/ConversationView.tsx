@@ -10,12 +10,13 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { newId } from '@/domain/hash';
+import { BLOCKED_EXTENSIONS } from '@/services/importer';
 import type { Attachment, Conversation, Message } from '@/domain/types';
 import { useStore } from '@/state/store';
 import { radius, space, type } from '@/theme/tokens';
 import { useIsWide, useTheme } from '@/theme/useTheme';
 import { formatDateTime, formatDay, formatTime } from '@/utils/time';
-import { ActionSheet, Avatar, Banner, Button, Chip, EmptyState, IconButton, platformLabel, SourceBadge, Txt } from './ui';
+import { ActionSheet, Avatar, Banner, Button, Chip, ConfirmDialog, EmptyState, IconButton, platformLabel, SheetFrame, SourceBadge, Txt } from './ui';
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '🙏'];
 
@@ -33,6 +34,8 @@ export function ConversationView({ conversationId, onBack }: { conversationId: s
   const [editing, setEditing] = useState<Message | null>(null);
   const [menu, setMenu] = useState<Message | null>(null);
   const [forwarding, setForwarding] = useState<Message | null>(null);
+  const [deleting, setDeleting] = useState<Message | null>(null);
+  const [notice, setNotice] = useState<string>();
   const [findOpen, setFindOpen] = useState(false);
   const [find, setFind] = useState('');
   const input = useRef<ComponentRef<typeof TextInput>>(null);
@@ -83,7 +86,13 @@ export function ConversationView({ conversationId, onBack }: { conversationId: s
     : '';
   const demoPeer = !imported && conv.members.some(m => state.contacts.find(c => c.id === m.contactId)?.isDemo);
   const typingHere = typing?.conversationId === conv.id && state.privacy.typingIndicators;
-  const subtitle = typingHere ? `${typing!.name.split(' ')[0]} is typing…` : imported ? `${conv.importedParticipants?.length ?? 0} participants · history only` : conv.kind === 'group' ? `You, ${memberNames}` : demoPeer ? 'Demo contact · simulated replies' : '';
+  const subtitle = typingHere
+    ? `${typing!.name.split(' ')[0]} is typing…`
+    : imported
+      ? `${conv.importedParticipants?.length ?? 0} participants · history only`
+      : conv.kind === 'group'
+        ? `You, ${memberNames}${demoPeer ? ' · demo group, simulated replies' : ''}`
+        : demoPeer ? 'Demo contact · simulated replies' : '';
 
   const send = () => {
     const text = draft.trim();
@@ -102,9 +111,11 @@ export function ConversationView({ conversationId, onBack }: { conversationId: s
   const attach = async () => {
     const res = await DocumentPicker.getDocumentAsync({ multiple: true, type: ['image/*', 'video/*', 'audio/*', 'application/pdf', 'application/*', 'text/*'] });
     if (res.canceled) return;
+    const blocked = res.assets.filter(a => BLOCKED_EXTENSIONS.test(a.name)).length;
+    setNotice(blocked ? `${blocked} file${blocked > 1 ? 's' : ''} weren’t added. Apps and scripts can’t be shared.` : undefined);
     setPending(p => [
       ...p,
-      ...res.assets.filter(a => !/\.(exe|apk|bat|cmd|scr|msi|js|jar|sh|ps1|vbs|dll)$/i.test(a.name)).map(a => ({
+      ...res.assets.filter(a => !BLOCKED_EXTENSIONS.test(a.name)).map(a => ({
         id: newId('att'),
         fileName: a.name,
         uri: a.uri,
@@ -168,7 +179,16 @@ export function ConversationView({ conversationId, onBack }: { conversationId: s
 
       {imported ? null : blocked ? (
         <View style={[styles.composerWrap, { backgroundColor: colors.surface, paddingBottom: insets.bottom + space.sm }]}>
-          <Txt variant="small" color="textMuted" style={{ textAlign: 'center', flex: 1 }}>You blocked this contact. Unblock them in details to send messages.</Txt>
+          <Txt variant="small" color="textMuted" style={{ textAlign: 'center' }}>You blocked this contact.</Txt>
+          <Button
+            label="Unblock"
+            compact
+            variant="secondary"
+            onPress={() => conv.members.forEach(mem => {
+              const c = state.contacts.find(x => x.id === mem.contactId);
+              if (c?.blocked) { dispatch({ type: 'patchContact', id: c.id, patch: { blocked: false } }); audit('contact.unblocked', c.displayName); }
+            })}
+          />
         </View>
       ) : (
         <View style={[styles.composerWrap, { backgroundColor: colors.surface, borderColor: colors.border, paddingBottom: (wide ? 0 : insets.bottom) + space.sm }]}>
@@ -181,6 +201,7 @@ export function ConversationView({ conversationId, onBack }: { conversationId: s
               <IconButton icon="close" label="Cancel" size={18} onPress={() => { setReplyTo(null); if (editing) setDraft(''); setEditing(null); }} />
             </View>
           ) : null}
+          {notice ? <Txt variant="caption" color="warning">{notice}</Txt> : null}
           {pending.length ? (
             <View style={styles.pending}>
               {pending.map(a => <Chip key={a.id} label={`✕ ${a.fileName}`} onPress={() => setPending(p => p.filter(x => x.id !== a.id))} />)}
@@ -196,6 +217,14 @@ export function ConversationView({ conversationId, onBack }: { conversationId: s
               placeholderTextColor={colors.textMuted}
               multiline
               accessibilityLabel="Message"
+              onKeyPress={e => {
+                // Desktop/web: Enter sends, Shift+Enter adds a new line.
+                const ev = e.nativeEvent as { key: string; shiftKey?: boolean };
+                if (Platform.OS === 'web' && ev.key === 'Enter' && !ev.shiftKey) {
+                  (e as unknown as { preventDefault: () => void }).preventDefault();
+                  send();
+                }
+              }}
               style={[type.body, styles.input, { backgroundColor: colors.surfaceAlt, color: colors.text }]}
             />
             <Pressable
@@ -232,10 +261,25 @@ export function ConversationView({ conversationId, onBack }: { conversationId: s
           { label: 'Copy text', icon: 'copy-outline', onPress: () => Clipboard.setStringAsync(m.text), hidden: !m.text },
           { label: 'Forward', icon: 'arrow-redo-outline', onPress: () => setForwarding(m), hidden: !!m.deletedAt || !!m.system },
           { label: 'Edit', icon: 'create-outline', onPress: () => { setEditing(m); setDraft(m.text); input.current?.focus(); }, hidden: imported || !mine || !!m.deletedAt || !m.text },
-          { label: 'Delete for everyone', icon: 'trash-outline', danger: true, onPress: () => { dispatch({ type: 'patchMessage', id: m.id, patch: { deletedAt: new Date().toISOString(), text: '', attachments: [] } }); audit('message.deleted', `in ${conv.title}`); }, hidden: imported || !mine || !!m.deletedAt },
+          { label: 'Delete message', icon: 'trash-outline', danger: true, onPress: () => setDeleting(m), hidden: imported || !mine || !!m.deletedAt },
         ] : []}
       />
       <ForwardSheet message={forwarding} from={conv} onClose={() => setForwarding(null)} />
+      <ConfirmDialog
+        visible={!!deleting}
+        title="Delete this message?"
+        body="It’s replaced with “This message was deleted” in this chat. You can’t undo this."
+        confirmLabel="Delete"
+        destructive
+        onCancel={() => setDeleting(null)}
+        onConfirm={() => {
+          if (deleting) {
+            dispatch({ type: 'patchMessage', id: deleting.id, patch: { deletedAt: new Date().toISOString(), text: '', attachments: [] } });
+            audit('message.deleted', `in ${conv.title}`);
+          }
+          setDeleting(null);
+        }}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -249,7 +293,7 @@ const Bubble = memo(function Bubble({ m, showName, replied, onLongPress, readRec
   }
   const mine = m.senderId === 'me';
   const fg = mine ? colors.bubbleMeText : colors.text;
-  const muted = mine ? 'rgba(255,255,255,0.75)' : colors.textMuted;
+  const muted = mine ? colors.bubbleMeMuted : colors.textMuted;
   const status = m.status && mine ? m.status : null;
   const statusIcon = status === 'read' && readReceipts ? 'checkmark-done' : status === 'delivered' || status === 'read' ? 'checkmark-done-outline' : status === 'sent' ? 'checkmark' : status === 'failed' ? 'alert-circle' : 'time-outline';
   const a11y = `${mine ? 'You' : m.senderName}, ${formatTime(m.sentAt)}: ${m.deletedAt ? 'message deleted' : m.text || 'attachment'}${m.editedAt ? ', edited' : ''}${m.reactions.length ? `, reactions ${m.reactions.map(r => r.emoji).join(' ')}` : ''}${status ? `, ${status}` : ''}`;
@@ -259,6 +303,10 @@ const Bubble = memo(function Bubble({ m, showName, replied, onLongPress, readRec
       <Pressable
         accessibilityLabel={a11y}
         accessibilityHint="Long-press for actions"
+        accessibilityActions={[{ name: 'longpress', label: 'Message actions' }]}
+        onAccessibilityAction={() => onLongPress(m)}
+        // Right-click on web/desktop opens the same menu.
+        {...(Platform.OS === 'web' ? { onContextMenu: (e: { preventDefault: () => void }) => { e.preventDefault(); onLongPress(m); } } : {})}
         onLongPress={() => onLongPress(m)}
         delayLongPress={300}
         style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs, { backgroundColor: mine ? colors.bubbleMe : colors.bubbleThem, borderColor: colors.border }]}
@@ -295,7 +343,7 @@ const Bubble = memo(function Bubble({ m, showName, replied, onLongPress, readRec
 
 function AttachmentView({ a, mine }: { a: Attachment; mine: boolean }) {
   const { colors } = useTheme();
-  const muted = mine ? 'rgba(255,255,255,0.8)' : colors.textMuted;
+  const muted = mine ? colors.bubbleMeMuted : colors.textMuted;
   if (a.kind === 'image' && a.uri) {
     return <Image source={{ uri: a.uri }} style={styles.image} contentFit="cover" accessibilityLabel={`Photo ${a.fileName}`} />;
   }
@@ -331,8 +379,7 @@ function ForwardSheet({ message, from, onClose }: { message: Message | null; fro
   const source = from.origin === 'imported' ? `${from.title} (${platformLabel(from.source)} import)` : message.senderId === 'me' ? from.title : message.senderName;
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={[styles.overlay, { backgroundColor: colors.overlay }]} onPress={onClose}>
-        <Pressable style={[styles.sheet, { backgroundColor: colors.surface }]}>
+      <SheetFrame onClose={onClose}>
           <Txt variant="heading" style={{ paddingHorizontal: space.lg }}>Forward to…</Txt>
           <Txt variant="caption" color="textMuted" style={{ paddingHorizontal: space.lg, marginBottom: space.sm }}>Recipients will see “Forwarded from {source}”.</Txt>
           <FlatList
@@ -361,8 +408,7 @@ function ForwardSheet({ message, from, onClose }: { message: Message | null; fro
               }}
             />
           </View>
-        </Pressable>
-      </Pressable>
+      </SheetFrame>
     </Modal>
   );
 }

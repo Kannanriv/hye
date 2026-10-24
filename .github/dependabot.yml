@@ -1,0 +1,41 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    # Expo SDK packages must move together; upgrade them with `npx expo install --fix`
+    # / an SDK upgrade rather than individual Dependabot bumps.
+    ignore:
+      - dependency-name: expo
+        update-types: [version-update:semver-major]
+      - dependency-name: expo-*
+        update-types: [version-update:semver-major]
+      - dependency-name: react-native
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: react
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: react-dom
+        update-types: [version-update:semver-major, version-update:semver-minor]
+    groups:
+      expo:
+        patterns:
+          - expo
+          - expo-*
+          - jest-expo
+
+  - package-ecosystem: npm
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      nestjs:
+        patterns:
+          - '@nestjs/*'
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

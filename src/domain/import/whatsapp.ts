@@ -48,11 +48,13 @@ const IOS_LINE =
 const ANDROID_LINE =
   /^(\d{1,4})[./-](\d{1,2})[./-](\d{1,4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap]\.?\s?m\.?)?\s[-–]\s(.*)$/i;
 
-const ATTACHED_IOS = /<attached:\s*([^>]+)>/i;
+// Bounded quantifiers keep these linear on hostile input (no catastrophic backtracking).
+const ATTACHED_IOS = /<attached:\s{0,4}([^>\n]{1,255})>/i;
 const ATTACHED_ANDROID = /^(.+\.[A-Za-z0-9]{2,5}) \(file attached\)$/;
 const OMITTED = /^(<Media omitted>|(image|video|audio|sticker|GIF|document) omitted|<.+ omitted>)$/i;
 const DELETED = /^(This message was deleted\.?|You deleted this message\.?)$/i;
-const EDITED_SUFFIX = /\s*<This message was edited>$/i;
+const EDITED_SUFFIX = '<this message was edited>';
+const E2EE_NOTICE = /end-to-end encrypted/i;
 
 function normalise(line: string): string {
   return line.replace(INVISIBLE, '').replace(SPACES, ' ').replace(/\r$/, '');
@@ -107,10 +109,14 @@ export function parseWhatsAppExport(raw: string): ParsedExport {
   });
 
   for (const r of records) {
-    r.text = r.text.replace(/\s+$/, '');
-    if (EDITED_SUFFIX.test(r.text)) {
+    r.text = r.text.trimEnd();
+    if (r.text.toLowerCase().endsWith(EDITED_SUFFIX)) {
       r.edited = true;
-      r.text = r.text.replace(EDITED_SUFFIX, '');
+      r.text = r.text.slice(0, -EDITED_SUFFIX.length).trimEnd();
+    }
+    if (r.kind === 'system' && E2EE_NOTICE.test(r.text)) {
+      // WhatsApp's own notice; shown attributed so it isn't read as a claim about hye.
+      r.text = `WhatsApp said: “${r.text}” This describes WhatsApp, not this imported copy.`;
     }
     if (r.kind !== 'message') continue;
     if (DELETED.test(r.text)) {

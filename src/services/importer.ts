@@ -8,7 +8,12 @@ import { DateOrder, parseWhatsAppExport, ParsedExport, titleFromFileName } from 
 import type { AppState, Conversation, ImportJob } from '@/domain/types';
 
 export const MAX_EXPORT_BYTES = 250 * 1024 * 1024;
-const BLOCKED_EXTENSIONS = /\.(exe|apk|bat|cmd|com|scr|msi|js|jar|sh|ps1|vbs|dll)$/i;
+const MAX_TEXT_BYTES = 50 * 1024 * 1024;
+const MAX_UNZIPPED_BYTES = 1024 * 1024 * 1024;
+const MAX_ENTRY_BYTES = 300 * 1024 * 1024;
+const MAX_ENTRIES = 5000;
+/** Executables, scripts and active content. Never stored, never offered for sharing. */
+export const BLOCKED_EXTENSIONS = /\.(exe|apk|apks|xapk|aab|dex|ipa|bat|cmd|com|scr|msi|js|mjs|jar|sh|ps1|vbs|dll|lnk|hta|html?|svg)$/i;
 
 export class ImportError extends Error {}
 
@@ -28,16 +33,38 @@ async function readBytes(uri: string): Promise<Uint8Array> {
 /** Step 5 of the migration flow: validate file type, size and archive structure. */
 export async function loadExport(asset: { uri: string; name: string; size?: number }): Promise<LoadedExport> {
   const name = asset.name;
-  if (asset.size && asset.size > MAX_EXPORT_BYTES) throw new ImportError('This file is larger than 250 MB. Export the chat again “Without media”, or split it.');
   if (!/\.(txt|zip)$/i.test(name)) throw new ImportError('Choose the .txt or .zip file that WhatsApp created when you exported the chat.');
+  const size = asset.size ?? (Platform.OS === 'web' ? undefined : new File(asset.uri).size);
+  if (size == null) throw new ImportError('We couldn’t check the size of this file. Save it to your phone first, then try again.');
+  const isText = /\.txt$/i.test(name);
+  if (size > (isText ? MAX_TEXT_BYTES : MAX_EXPORT_BYTES)) {
+    throw new ImportError(`This file is larger than ${isText ? 50 : 250} MB. Export the chat again “Without media”, or export a shorter time range.`);
+  }
 
   const bytes = await readBytes(asset.uri);
-  if (/\.txt$/i.test(name)) return { fileName: name, text: strFromU8(bytes), media: new Map(), skippedFiles: [] };
+  if (isText) return { fileName: name, text: strFromU8(bytes), media: new Map(), skippedFiles: [] };
 
+  // Check declared sizes before inflating anything, so a zip bomb can't exhaust memory.
+  let total = 0;
+  let count = 0;
+  const skippedFiles: string[] = [];
   let entries: Record<string, Uint8Array>;
   try {
-    entries = unzipSync(bytes);
-  } catch {
+    entries = unzipSync(bytes, {
+      filter: f => {
+        if (++count > MAX_ENTRIES) throw new ImportError('This archive has too many files to be a chat export.');
+        total += f.originalSize;
+        if (f.originalSize > MAX_ENTRY_BYTES || total > MAX_UNZIPPED_BYTES) throw new ImportError('This archive is too large once unpacked. Export the chat “Without media”.');
+        const base = f.name.split('/').pop() ?? '';
+        if (BLOCKED_EXTENSIONS.test(base) || base.startsWith('.')) {
+          if (base) skippedFiles.push(base);
+          return false;
+        }
+        return true;
+      },
+    });
+  } catch (e) {
+    if (e instanceof ImportError) throw e;
     throw new ImportError('We couldn’t open this .zip file. It may be incomplete — try exporting the chat again.');
   }
   const names = Object.keys(entries).filter(n => !n.endsWith('/'));
@@ -45,11 +72,11 @@ export async function loadExport(asset: { uri: string; name: string; size?: numb
   if (!chat) throw new ImportError('This archive doesn’t contain a WhatsApp chat file (_chat.txt).');
 
   const media = new Map<string, Uint8Array>();
-  const skippedFiles: string[] = [];
   for (const n of names) {
     if (n === chat) continue;
     const base = n.split('/').pop()!;
-    if (BLOCKED_EXTENSIONS.test(base) || base.startsWith('.')) skippedFiles.push(base);
+    // export.txt is reserved for our saved copy; duplicate names keep the first file.
+    if (base === 'export.txt' || media.has(base)) skippedFiles.push(base);
     else media.set(base, entries[n]);
   }
   return { fileName: name, text: strFromU8(entries[chat]), media, skippedFiles };
@@ -112,20 +139,40 @@ export async function persistExport(jobId: string, loaded: LoadedExport): Promis
   return saved;
 }
 
-/** Reloads a saved export for resuming or retrying a job. Returns null if it is no longer on the device. */
-export async function reloadExport(jobId: string): Promise<{ loaded: LoadedExport; archive: ArchiveFile[] } | null> {
+/**
+ * Reloads a saved export for resuming or retrying a job. Returns null if it is no longer on the device.
+ * `fileName` must be the job's original name: the conversation key (and so every source key) derives from it.
+ */
+export async function reloadExport(jobId: string, fileName: string): Promise<{ loaded: LoadedExport; archive: ArchiveFile[] } | null> {
   if (Platform.OS === 'web') return null;
   const dir = new Directory(Paths.document, 'imports', jobId);
   const source = new File(dir, 'export.txt');
   if (!source.exists) return null;
   const archive = dir.list().filter((e): e is File => e instanceof File && e.name !== 'export.txt').map(f => ({ name: f.name, uri: f.uri }));
-  return { loaded: { fileName: 'export.txt', text: await source.text(), media: new Map(), skippedFiles: [] }, archive };
+  return { loaded: { fileName, text: await source.text(), media: new Map(), skippedFiles: [] }, archive };
 }
 
 export function deleteImportFiles(jobId?: string) {
   if (Platform.OS === 'web') return;
   const dir = jobId ? new Directory(Paths.document, 'imports', jobId) : new Directory(Paths.document, 'imports');
   if (dir.exists) dir.delete();
+}
+
+/** Deletes imported files and everything in the cache (picked files, exports, reports). Best effort. */
+export function clearAppFiles() {
+  if (Platform.OS === 'web') return;
+  try {
+    deleteImportFiles();
+  } catch {
+    // keep going: the cache may still hold copies
+  }
+  for (const entry of Paths.cache.list()) {
+    try {
+      entry.delete();
+    } catch {
+      // in use by the OS; it will be cleared with the app's cache
+    }
+  }
 }
 
 export function newJob(platform: 'whatsapp', fileName: string, conversationId: string, total: number, order: DateOrder, me: string | null): ImportJob {

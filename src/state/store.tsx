@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import { newId } from '@/domain/hash';
@@ -6,9 +5,10 @@ import type {
   AppState, Attachment, AuditEvent, Contact, Conversation, ImportJob, Message, NotificationPrefs, PrivacySettings, SavedLink, User,
 } from '@/domain/types';
 import { DEMO_REPLIES, demoWorld, initialState } from './demo';
+import { clearStorage, loadState, PersistedChunks, saveState } from './persistence';
 import { expiredMessageIds } from './selectors';
 
-const STORAGE_KEY = 'hye/state/v1';
+// Persistence lives in ./persistence (chunked, change-only writes).
 
 type Action =
   | { type: 'hydrate'; state: AppState }
@@ -31,7 +31,7 @@ type Action =
   | { type: 'applyRetention' }
   | { type: 'reset' };
 
-function reducer(s: AppState, a: Action): AppState {
+export function reducer(s: AppState, a: Action): AppState {
   switch (a.type) {
     case 'hydrate':
       return a.state;
@@ -78,6 +78,8 @@ function reducer(s: AppState, a: Action): AppState {
         ...s,
         conversations: s.conversations.filter(c => c.id !== a.id),
         messages: s.messages.filter(m => m.conversationId !== a.id),
+        // An import job without its conversation can't be resumed meaningfully.
+        importJobs: s.importJobs.filter(j => j.conversationId !== a.id),
       };
     case 'upsertImportJob': {
       const exists = s.importJobs.some(j => j.id === a.job.id);
@@ -123,6 +125,10 @@ interface StoreValue {
   audit: (action: string, detail: string) => void;
   sendMessage: (conversationId: string, text: string, opts?: { attachments?: Attachment[]; replyToId?: string; forwardedFrom?: string }) => void;
   markRead: (conversationId: string) => void;
+  /** True when saved data exists but couldn't be read. Saving is paused until the user decides. */
+  loadError: boolean;
+  wipeAll: () => Promise<void>;
+  startFresh: () => Promise<void>;
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
@@ -135,29 +141,57 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   stateRef.current = state;
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
+  const [loadError, setLoadError] = useState(false);
+  const persisted = useRef<PersistedChunks>(new Map());
+
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then(raw => {
-        if (raw) dispatch({ type: 'hydrate', state: { ...initialState, ...JSON.parse(raw) } });
+    loadState()
+      .then(({ state: loaded, chunks }) => {
+        persisted.current = chunks;
+        if (loaded) dispatch({ type: 'hydrate', state: loaded });
         dispatch({ type: 'applyRetention' });
+        setReady(true);
       })
       .catch(() => {
-        // Corrupt or unreadable storage: start clean rather than crash. Nothing is overwritten until the next change.
-      })
-      .finally(() => setReady(true));
+        // Never auto-save over data we couldn't read; the user chooses what happens next.
+        setLoadError(true);
+      });
     const t = timers.current;
     return () => t.forEach(clearTimeout);
   }, []);
 
-  const flush = useCallback(() => AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(stateRef.current)), []);
+  /** Writes changed chunks to disk now. Rejects on failure so callers (imports) can stop. */
+  const flush = useCallback(async () => {
+    if (!readyRef.current) return;
+    persisted.current = await saveState(stateRef.current, persisted.current);
+  }, []);
+  const readyRef = useRef(false);
+  readyRef.current = ready;
 
   useEffect(() => {
     if (!ready) return;
     const id = setTimeout(() => {
       flush().catch(() => undefined);
-    }, 300);
+    }, 400);
     return () => clearTimeout(id);
   }, [state, ready, flush]);
+
+  /** Erases everything: storage, imported files, caches and pending demo timers. */
+  const wipeAll = useCallback(async () => {
+    timers.current.forEach(clearTimeout);
+    timers.current = [];
+    setTyping(null);
+    await clearStorage();
+    persisted.current = new Map();
+    dispatch({ type: 'reset' });
+  }, []);
+
+  const startFresh = useCallback(async () => {
+    await clearStorage().catch(() => undefined);
+    persisted.current = new Map();
+    setLoadError(false);
+    setReady(true);
+  }, []);
 
   const audit = useCallback((action: string, detail: string) => {
     dispatch({ type: 'audit', event: { id: newId('aud'), at: new Date().toISOString(), action, detail } });
@@ -225,8 +259,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ state, ready, dispatch, flush, typing, audit, sendMessage, markRead }),
-    [state, ready, flush, typing, audit, sendMessage, markRead],
+    () => ({ state, ready, loadError, dispatch, flush, typing, audit, sendMessage, markRead, wipeAll, startFresh }),
+    [state, ready, loadError, flush, typing, audit, sendMessage, markRead, wipeAll, startFresh],
   );
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }

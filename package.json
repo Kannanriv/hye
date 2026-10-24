@@ -33,11 +33,12 @@
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
-    "phone": "adb reverse tcp:8081 tcp:8081 && expo start --android --localhost",
+    "phone": "adb reverse tcp:8082 tcp:8082 && expo start --port 8082",
     "web": "expo start --web",
     "test": "jest",
     "typecheck": "tsc --noEmit",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "e2e:web": "python .claude/skills/webapp-testing/scripts/with_server.py --server \"npx expo start --web --port 8081\" --port 8081 --timeout 600 -- python e2e/web/test_journeys.py"
   },
   "private": true,
   "jest": {

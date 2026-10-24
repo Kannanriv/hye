@@ -13,6 +13,11 @@ import { useTheme } from '@/theme/useTheme';
 import { platformForUrl } from '@/utils/labels';
 import { formatListTime } from '@/utils/time';
 
+/** Only ever open web links, even if stored data was tampered with (no intent:, file:, javascript:). */
+function openSafely(url: string) {
+  if (/^https?:\/\//i.test(url)) Linking.openURL(url).catch(() => undefined);
+}
+
 export default function FeedScreen() {
   const { state, dispatch } = useStore();
   const { colors } = useTheme();
@@ -73,7 +78,7 @@ export default function FeedScreen() {
               </Pressable>
             </View>
             {l.note ? <Txt>{l.note}</Txt> : null}
-            <Pressable accessibilityRole="link" accessibilityLabel={`Open original post: ${l.url}`} onPress={() => Linking.openURL(l.url)} style={styles.link}>
+            <Pressable accessibilityRole="link" accessibilityLabel={`Open original post: ${l.url}`} onPress={() => openSafely(l.url)} style={styles.link}>
               <Ionicons name="open-outline" size={16} color={colors.accent} />
               <Txt variant="small" color="accent" numberOfLines={1} style={{ flex: 1 }}>{l.url}</Txt>
             </Pressable>

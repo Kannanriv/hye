@@ -15,7 +15,11 @@ export function Txt({ children, variant = 'body', color, style, numberOfLines }:
 }) {
   const { colors } = useTheme();
   return (
-    <Text numberOfLines={numberOfLines} style={[type[variant], { color: colors[color ?? 'text'] }, style]}>
+    <Text
+      numberOfLines={numberOfLines}
+      accessibilityRole={variant === 'title' || variant === 'heading' ? 'header' : undefined}
+      style={[type[variant], { color: colors[color ?? 'text'] }, style]}
+    >
       {children}
     </Text>
   );
@@ -27,7 +31,7 @@ export function Button({ label, onPress, variant = 'primary', icon, disabled, lo
 }) {
   const { colors } = useTheme();
   const bg = { primary: colors.accent, secondary: colors.surfaceAlt, ghost: 'transparent', danger: colors.danger }[variant];
-  const fg = { primary: colors.onAccent, secondary: colors.text, ghost: colors.accent, danger: '#FFFFFF' }[variant];
+  const fg = { primary: colors.onAccent, secondary: colors.text, ghost: colors.accent, danger: colors.onDanger }[variant];
   return (
     <Pressable
       accessibilityRole="button"
@@ -72,7 +76,8 @@ export function Chip({ label, selected, onPress, count }: { label: string; selec
       accessibilityRole="button"
       accessibilityState={{ selected: !!selected }}
       onPress={onPress}
-      style={[styles.chip, { backgroundColor: selected ? colors.accent : colors.surface, borderColor: selected ? colors.accent : colors.border }]}
+      hitSlop={{ top: 5, bottom: 5 }}
+      style={[styles.chip, { backgroundColor: selected ? colors.accent : colors.surface, borderColor: selected ? colors.accent : colors.borderStrong }]}
     >
       <Text style={[type.small, { color: selected ? colors.onAccent : colors.text, fontWeight: '600' }]} numberOfLines={1}>
         {label}
@@ -92,7 +97,7 @@ export function TextField(props: TextInputProps & { label?: string; error?: stri
         placeholderTextColor={colors.textMuted}
         accessibilityLabel={label ?? props.placeholder}
         {...rest}
-        style={[styles.input, { backgroundColor: colors.surface, borderColor: error ? colors.danger : colors.border, color: colors.text }, style]}
+        style={[styles.input, { backgroundColor: colors.surface, borderColor: error ? colors.danger : colors.borderStrong, color: colors.text }, style]}
       />
       {error ? <Txt variant="caption" color="danger">{error}</Txt> : null}
     </View>
@@ -133,7 +138,8 @@ export function Tag({ label, tone = 'muted' }: { label: string; tone?: 'muted' |
   );
 }
 
-const AVATAR_TINTS = ['#6366F1', '#0EA5E9', '#14B8A6', '#F59E0B', '#EC4899', '#8B5CF6', '#64748B'];
+// All tints give white initials at least 4.5:1 contrast.
+const AVATAR_TINTS = ['#4F46E5', '#0369A1', '#0F766E', '#B45309', '#BE185D', '#7C3AED', '#475569'];
 export const Avatar = memo(function Avatar({ name, size = 44, group }: { name: string; size?: number; group?: boolean }) {
   const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase()).join('') || '?';
   const tint = AVATAR_TINTS[[...name].reduce((n, ch) => n + ch.charCodeAt(0), 0) % AVATAR_TINTS.length];
@@ -254,6 +260,22 @@ export function ConfirmDialog({ visible, title, body, confirmLabel, destructive,
   );
 }
 
+/**
+ * Bottom-sheet container. The backdrop is a sibling of the sheet (not a wrapper) so screen
+ * readers can reach every control inside the sheet.
+ */
+export function SheetFrame({ children, onClose, style }: { children: ReactNode; onClose: () => void; style?: ViewStyle }) {
+  const { colors } = useTheme();
+  return (
+    <View style={[styles.sheetOverlay, { backgroundColor: colors.overlay }]}>
+      <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} />
+      <View accessibilityViewIsModal onAccessibilityEscape={onClose} style={[styles.sheet, { backgroundColor: colors.surface }, style]}>
+        {children}
+      </View>
+    </View>
+  );
+}
+
 /** Bottom sheet style menu used for long-press actions. */
 export function ActionSheet({ visible, title, actions, onClose, header }: {
   visible: boolean; title?: string; onClose: () => void; header?: ReactNode;
@@ -262,15 +284,13 @@ export function ActionSheet({ visible, title, actions, onClose, header }: {
   const { colors } = useTheme();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable accessibilityLabel="Close menu" style={[styles.sheetOverlay, { backgroundColor: colors.overlay }]} onPress={onClose}>
-        <Pressable style={[styles.sheet, { backgroundColor: colors.surface }]}>
-          {title ? <Txt variant="subheading" style={{ paddingHorizontal: space.lg, paddingBottom: space.sm }}>{title}</Txt> : null}
-          {header}
-          {actions.filter(a => !a.hidden).map(a => (
-            <Row key={a.label} icon={a.icon} label={a.label} danger={a.danger} right={<View />} onPress={() => { onClose(); a.onPress(); }} />
-          ))}
-        </Pressable>
-      </Pressable>
+      <SheetFrame onClose={onClose}>
+        {title ? <Txt variant="subheading" style={{ paddingHorizontal: space.lg, paddingBottom: space.sm }}>{title}</Txt> : null}
+        {header}
+        {actions.filter(a => !a.hidden).map(a => (
+          <Row key={a.label} icon={a.icon} label={a.label} danger={a.danger} right={<View />} onPress={() => { onClose(); a.onPress(); }} />
+        ))}
+      </SheetFrame>
     </Modal>
   );
 }

@@ -24,6 +24,7 @@ export default function Details() {
   const [adding, setAdding] = useState(false);
   const [confirm, setConfirm] = useState<'block' | 'report' | 'leave' | null>(null);
   const [notice, setNotice] = useState<string>();
+  const [pendingTimer, setPendingTimer] = useState<RetentionPolicy | null>(null);
 
   if (!conv) return <Screen title="Details" back><EmptyState icon="help-circle-outline" title="Conversation not found" /></Screen>;
   const patch = (p: Partial<Conversation>) => dispatch({ type: 'patchConversation', id: conv.id, patch: p });
@@ -47,6 +48,15 @@ export default function Details() {
     patch({ members });
     systemNote(note);
     audit('group.members', `${conv.title}: ${note}`);
+  };
+
+  const RETENTION_MS: Record<RetentionPolicy, number> = { off: Infinity, '24h': 86_400_000, '7d': 7 * 86_400_000, '90d': 90 * 86_400_000 };
+  const expiringCount = (r: RetentionPolicy) => msgs.filter(x => !x.system && Date.now() - new Date(x.sentAt).getTime() > RETENTION_MS[r]).length;
+  const applyTimer = (r: RetentionPolicy) => {
+    patch({ retention: r });
+    systemNote(r === 'off' ? 'Message timer turned off' : `Messages now disappear after ${RETENTION_LABEL[r]}`);
+    dispatch({ type: 'applyRetention' });
+    audit('retention.changed', `${conv.title}: ${RETENTION_LABEL[r]}`);
   };
 
   const m = memberMenu;
@@ -92,7 +102,11 @@ export default function Details() {
           <SectionTitle>Message timer</SectionTitle>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
             {(Object.keys(RETENTION_LABEL) as RetentionPolicy[]).map(r => (
-              <Chip key={r} label={RETENTION_LABEL[r]} selected={conv.retention === r} onPress={() => { patch({ retention: r }); systemNote(r === 'off' ? 'Message timer turned off' : `Messages now disappear after ${RETENTION_LABEL[r]}`); dispatch({ type: 'applyRetention' }); }} />
+              <Chip key={r} label={RETENTION_LABEL[r]} selected={conv.retention === r} onPress={() => {
+                if (r === conv.retention) return;
+                if (expiringCount(r) > 0) setPendingTimer(r);
+                else applyTimer(r);
+              }} />
             ))}
           </View>
         </>
@@ -131,6 +145,15 @@ export default function Details() {
       </Card>
       {notice ? <Banner icon="checkmark-circle-outline" title={notice} /> : null}
 
+      <ConfirmDialog
+        visible={!!pendingTimer}
+        title={`Turn on a ${pendingTimer ? RETENTION_LABEL[pendingTimer] : ''} timer?`}
+        body={`${pendingTimer ? expiringCount(pendingTimer) : 0} older messages in this chat will be deleted from this device now. This can’t be undone.`}
+        confirmLabel="Turn on and delete"
+        destructive
+        onCancel={() => setPendingTimer(null)}
+        onConfirm={() => { if (pendingTimer) applyTimer(pendingTimer); setPendingTimer(null); }}
+      />
       <ConfirmDialog visible={renaming} title="Rename group" body="Everyone in the group will see the new name." confirmLabel="Save" confirmDisabled={!title.trim()} onCancel={() => setRenaming(false)}
         onConfirm={() => { patch({ title: title.trim() }); systemNote(`You renamed the group to “${title.trim()}”`); setRenaming(false); }}>
         <TextField value={title} onChangeText={setTitle} maxLength={60} accessibilityLabel="Group name" />
@@ -138,7 +161,7 @@ export default function Details() {
       <ConfirmDialog visible={confirm === 'block'} title={`Block ${peer?.displayName}?`} body="They won’t be able to message you, and this chat leaves your inbox. They won’t be told." confirmLabel="Block" destructive onCancel={() => setConfirm(null)}
         onConfirm={() => { if (peer) { dispatch({ type: 'patchContact', id: peer.id, patch: { blocked: true } }); audit('contact.blocked', peer.displayName); } setConfirm(null); router.back(); }} />
       <ConfirmDialog visible={confirm === 'report'} title="Report this conversation?" body="The last 20 messages would be sent to hye’s safety team for review. In the prototype, nothing leaves your device; the report is logged in Security activity." confirmLabel="Report" destructive onCancel={() => setConfirm(null)}
-        onConfirm={() => { audit('conversation.reported', conv.title); setNotice('Report recorded. Thanks for helping keep hye safe.'); setConfirm(null); }} />
+        onConfirm={() => { audit('conversation.reported', conv.title); setNotice('Report saved in Security activity. In the prototype, nothing was sent.'); setConfirm(null); }} />
       <ConfirmDialog visible={confirm === 'leave'} title={`Leave “${conv.title}”?`} body="You’ll stop getting messages. Your copy of the history stays in Archive." confirmLabel="Leave" destructive onCancel={() => setConfirm(null)}
         onConfirm={() => { systemNote('You left the group'); patch({ archived: true, members: conv.members.filter(x => x.contactId !== 'me') }); audit('group.left', conv.title); setConfirm(null); router.back(); }} />
 
