@@ -1,0 +1,44 @@
+# Cold-start Expo Go and open the hye project served by Metro on the laptop.
+# Requires: `adb reverse tcp:8082 tcp:8082` and `npx expo start --port 8082`.
+# Lands on the Welcome screen (signed out) or the Inbox (signed in).
+appId: host.exp.exponent
+env:
+  EXPO_URL: ${EXPO_URL || "exp://127.0.0.1:8082"}
+---
+# launchApp stops Expo Go first, so the JS bundle restarts from the root route.
+# App data (AsyncStorage) is kept.
+- launchApp:
+    appId: host.exp.exponent
+- openLink: ${EXPO_URL}
+
+# Android may ask which app should open exp:// links (e.g. when a dev client is installed).
+- runFlow:
+    when:
+      visible: "Open with.*|Open in.*"
+    commands:
+      - tapOn:
+          text: "Expo Go"
+          optional: true
+      - tapOn:
+          text: "Just once|Always"
+          optional: true
+
+# First bundle over USB can take a while.
+- extendedWaitUntil:
+    visible: "hye|Inbox"
+    timeout: 180000
+    label: Wait for hye to finish loading in Expo Go
+
+# Expo Go shows a one-time "developer menu" intro sheet after the first project load.
+- runFlow:
+    when:
+      visible: ".*developer menu.*"
+    commands:
+      - tapOn:
+          text: "Continue|Got it|Close"
+          optional: true
+
+# "hye" also appears in Expo Go's own project list, so confirm we're inside the app.
+- extendedWaitUntil:
+    visible: "Get started|Inbox"
+    timeout: 30000

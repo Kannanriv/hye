@@ -28,7 +28,8 @@
       "expo-router",
       "expo-status-bar",
       "expo-sharing",
-      "expo-image"
+      "expo-image",
+      "expo-video"
     ],
     "scheme": "hye",
     "experiments": {

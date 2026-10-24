@@ -1,12 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { Screen } from '@/components/Screen';
-import { Avatar, Button, Card, Chip, Divider, Tag, TextField, Txt } from '@/components/ui';
+import { PhotoAvatar, PressableScale } from '@/components/premium';
+import { Button, Card, Chip, Divider, Tag, TextField, Txt } from '@/components/ui';
 import { newId } from '@/domain/hash';
 import type { Conversation } from '@/domain/types';
+import { useDirectChat } from '@/features/chats/useDirectChat';
 import { useStore } from '@/state/store';
 import { space } from '@/theme/tokens';
 import { useTheme } from '@/theme/useTheme';
@@ -23,21 +25,10 @@ export default function NewChat() {
 
   const open = (id: string) => router.replace({ pathname: '/conversation/[id]', params: { id } });
 
+  const directChat = useDirectChat();
   const startDirect = (contactId: string) => {
-    const existing = state.conversations.find(c => c.kind === 'direct' && c.origin === 'native' && c.members.some(m => m.contactId === contactId));
-    if (existing) {
-      if (existing.archived) dispatch({ type: 'patchConversation', id: existing.id, patch: { archived: false } });
-      return open(existing.id);
-    }
-    const contact = state.contacts.find(c => c.id === contactId)!;
-    const now = new Date().toISOString();
-    const conv: Conversation = {
-      id: newId('cv'), kind: 'direct', origin: 'native', source: 'hye', title: contact.displayName,
-      members: [{ contactId: 'me', role: 'admin' }, { contactId, role: 'member' }], createdAt: now, lastActivityAt: now, lastReadAt: now,
-      pinned: false, muted: false, archived: false, markedUnread: false, retention: state.privacy.defaultRetention,
-    };
-    dispatch({ type: 'upsertConversation', conversation: conv });
-    open(conv.id);
+    const id = directChat(contactId);
+    if (id) open(id);
   };
 
   const createGroup = () => {
@@ -71,21 +62,23 @@ export default function NewChat() {
           return (
             <View key={c.id}>
               {i > 0 ? <Divider /> : null}
-              <Pressable
+              <PressableScale
+                scaleTo={0.98}
+                haptic={mode === 'group' ? 'select' : undefined}
                 accessibilityRole={mode === 'group' ? 'checkbox' : 'button'}
                 accessibilityState={mode === 'group' ? { checked: on } : undefined}
                 accessibilityLabel={`${c.displayName}${c.isDemo ? ', demo contact' : ''}`}
                 onPress={() => (mode === 'group' ? setPicked(p => (on ? p.filter(x => x !== c.id) : [...p, c.id])) : startDirect(c.id))}
-                style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.surfaceAlt }]}
+                style={[styles.row, on && { backgroundColor: colors.accentSoft }]}
               >
-                <Avatar name={c.displayName} size={40} />
+                <PhotoAvatar name={c.displayName} uri={c.avatarUrl} size={44} />
                 <View style={{ flex: 1 }}>
                   <Txt>{c.displayName}</Txt>
                   <Txt variant="caption" color="textMuted">@{c.handle}</Txt>
                 </View>
                 {c.isDemo ? <Tag label="Demo" /> : null}
                 {mode === 'group' ? <Ionicons name={on ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={on ? colors.accent : colors.textMuted} /> : null}
-              </Pressable>
+              </PressableScale>
             </View>
           );
         })}

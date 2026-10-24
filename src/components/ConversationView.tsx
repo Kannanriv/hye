@@ -7,16 +7,22 @@ import { ComponentRef, memo, useCallback, useEffect, useMemo, useRef, useState }
 import {
   FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, TextInput, View,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import Animated, {
+  FadeInDown, useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withRepeat, withSequence, withSpring, withTiming, ZoomIn,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { newId } from '@/domain/hash';
 import { BLOCKED_EXTENSIONS } from '@/services/importer';
 import type { Attachment, Conversation, Message } from '@/domain/types';
+import { ChatAvatar } from '@/features/chats/ChatAvatar';
 import { useStore } from '@/state/store';
-import { radius, space, type } from '@/theme/tokens';
+import { gradients, radius, space, type } from '@/theme/tokens';
 import { useIsWide, useTheme } from '@/theme/useTheme';
 import { formatDateTime, formatDay, formatTime } from '@/utils/time';
-import { ActionSheet, Avatar, Banner, Button, Chip, ConfirmDialog, EmptyState, IconButton, platformLabel, SheetFrame, SourceBadge, Txt } from './ui';
+import { PressableScale, useHaptics } from './premium';
+import { ActionSheet, Banner, Button, Chip, ConfirmDialog, EmptyState, IconButton, IconName, platformLabel, SheetFrame, SourceBadge, Txt } from './ui';
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '🙏'];
 
@@ -39,6 +45,10 @@ export function ConversationView({ conversationId, onBack }: { conversationId: s
   const [findOpen, setFindOpen] = useState(false);
   const [find, setFind] = useState('');
   const input = useRef<ComponentRef<typeof TextInput>>(null);
+  const buzz = useHaptics();
+  const reduceMotion = useReducedMotion();
+  // Only messages that arrive while the chat is open animate in; history renders instantly.
+  const openedAt = useRef(new Date().toISOString()).current;
 
   const messages = useMemo(
     () => state.messages.filter(m => m.conversationId === conversationId).sort((a, b) => a.sentAt.localeCompare(b.sentAt)),
@@ -71,9 +81,16 @@ export function ConversationView({ conversationId, onBack }: { conversationId: s
       item.kind === 'day' ? (
         <View style={styles.day}><Txt variant="caption" color="textMuted" style={[styles.dayPill, { backgroundColor: colors.surface }]}>{item.label}</Txt></View>
       ) : (
-        <Bubble m={item.m} showName={item.showName} replied={item.m.replyToId ? byId.get(item.m.replyToId) : undefined} onLongPress={onLongPress} readReceipts={state.privacy.readReceipts} />
+        <Bubble
+          m={item.m}
+          showName={item.showName}
+          replied={item.m.replyToId ? byId.get(item.m.replyToId) : undefined}
+          onLongPress={onLongPress}
+          readReceipts={state.privacy.readReceipts}
+          animate={!reduceMotion && item.m.sentAt >= openedAt}
+        />
       ),
-    [byId, onLongPress, colors.surface, state.privacy.readReceipts],
+    [byId, onLongPress, colors.surface, state.privacy.readReceipts, reduceMotion, openedAt],
   );
 
   if (!conv) {
@@ -103,6 +120,7 @@ export function ConversationView({ conversationId, onBack }: { conversationId: s
     } else {
       sendMessage(conv.id, text, { attachments: pending, replyToId: replyTo?.id });
     }
+    buzz('tap');
     setDraft('');
     setPending([]);
     setReplyTo(null);
@@ -136,7 +154,7 @@ export function ConversationView({ conversationId, onBack }: { conversationId: s
           style={styles.headerTitle}
           onPress={() => router.push({ pathname: '/conversation/[id]/details', params: { id: conv.id } })}
         >
-          <Avatar name={conv.title} size={38} group={conv.kind === 'group'} />
+          <ChatAvatar conv={conv} contacts={state.contacts} size={40} />
           <View style={styles.flex}>
             <Txt variant="subheading" numberOfLines={1}>{conv.title}</Txt>
             {subtitle ? <Txt variant="caption" color={typingHere ? 'accent' : 'textMuted'} numberOfLines={1}>{subtitle}</Txt> : null}
@@ -165,6 +183,8 @@ export function ConversationView({ conversationId, onBack }: { conversationId: s
         </View>
       ) : null}
 
+      <View style={styles.flex}>
+      <Wallpaper />
       <FlatList
         inverted
         data={items}
@@ -176,6 +196,7 @@ export function ConversationView({ conversationId, onBack }: { conversationId: s
         keyboardShouldPersistTaps="handled"
         windowSize={11}
       />
+      </View>
 
       {imported ? null : blocked ? (
         <View style={[styles.composerWrap, { backgroundColor: colors.surface, paddingBottom: insets.bottom + space.sm }]}>
@@ -227,15 +248,7 @@ export function ConversationView({ conversationId, onBack }: { conversationId: s
               }}
               style={[type.body, styles.input, { backgroundColor: colors.surfaceAlt, color: colors.text }]}
             />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={editing ? 'Save edit' : 'Send'}
-              disabled={!draft.trim() && !pending.length}
-              onPress={send}
-              style={[styles.send, { backgroundColor: draft.trim() || pending.length ? colors.accent : colors.surfaceAlt }]}
-            >
-              <Ionicons name={editing ? 'checkmark' : 'arrow-up'} size={22} color={draft.trim() || pending.length ? colors.onAccent : colors.textMuted} />
-            </Pressable>
+            <SendButton active={!!draft.trim() || pending.length > 0} editing={!!editing} onPress={send} />
           </View>
         </View>
       )}
@@ -245,11 +258,24 @@ export function ConversationView({ conversationId, onBack }: { conversationId: s
         onClose={() => setMenu(null)}
         header={m && !imported && !m.deletedAt ? (
           <View style={styles.reactRow}>
-            {QUICK_REACTIONS.map(e => (
-              <Pressable key={e} accessibilityRole="button" accessibilityLabel={`React with ${e}`} onPress={() => { dispatch({ type: 'toggleReaction', id: m.id, emoji: e }); setMenu(null); }} style={[styles.reactBtn, { backgroundColor: colors.surfaceAlt }]}>
-                <Txt variant="heading">{e}</Txt>
-              </Pressable>
-            ))}
+            {QUICK_REACTIONS.map((e, i) => {
+              const on = m.reactions.some(r => r.by === 'me' && r.emoji === e);
+              return (
+                <Animated.View key={e} entering={reduceMotion ? undefined : ZoomIn.delay(i * 35).springify().damping(11)}>
+                  <PressableScale
+                    scaleTo={0.8}
+                    haptic="select"
+                    accessibilityRole="button"
+                    accessibilityLabel={`React with ${e}`}
+                    accessibilityState={{ selected: on }}
+                    onPress={() => { dispatch({ type: 'toggleReaction', id: m.id, emoji: e }); setMenu(null); }}
+                    style={[styles.reactBtn, { backgroundColor: on ? colors.accentSoft : colors.surfaceAlt, borderColor: on ? colors.accent : 'transparent' }]}
+                  >
+                    <Txt variant="heading">{e}</Txt>
+                  </PressableScale>
+                </Animated.View>
+              );
+            })}
           </View>
         ) : m && imported ? (
           <Txt variant="caption" color="textMuted" style={{ paddingHorizontal: space.lg, paddingBottom: space.sm }}>
@@ -284,10 +310,16 @@ export function ConversationView({ conversationId, onBack }: { conversationId: s
   );
 }
 
-const Bubble = memo(function Bubble({ m, showName, replied, onLongPress, readReceipts }: {
-  m: Message; showName: boolean; replied?: Message; onLongPress: (m: Message) => void; readReceipts: boolean;
+// My bubbles use the first two (darkest) brand stops so white text stays above 4.5:1 everywhere on the gradient.
+const MY_BUBBLE = [gradients.brand[0], gradients.brand[1]] as const;
+
+const Bubble = memo(function Bubble({ m, showName, replied, onLongPress, readReceipts, animate }: {
+  m: Message; showName: boolean; replied?: Message; onLongPress: (m: Message) => void; readReceipts: boolean; animate: boolean;
 }) {
   const { colors } = useTheme();
+  // Reactions only pop when they change after the bubble is on screen, not while scrolling history.
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; }, []);
   if (m.system) {
     return <View style={styles.day}><Txt variant="caption" color="textMuted" style={[styles.system, { backgroundColor: colors.surfaceAlt }]}>{m.text}</Txt></View>;
   }
@@ -299,7 +331,10 @@ const Bubble = memo(function Bubble({ m, showName, replied, onLongPress, readRec
   const a11y = `${mine ? 'You' : m.senderName}, ${formatTime(m.sentAt)}: ${m.deletedAt ? 'message deleted' : m.text || 'attachment'}${m.editedAt ? ', edited' : ''}${m.reactions.length ? `, reactions ${m.reactions.map(r => r.emoji).join(' ')}` : ''}${status ? `, ${status}` : ''}`;
 
   return (
-    <View style={[styles.bubbleRow, { justifyContent: mine ? 'flex-end' : 'flex-start' }]}>
+    <Animated.View
+      entering={animate ? FadeInDown.springify().damping(16).stiffness(180) : undefined}
+      style={[styles.bubbleRow, { justifyContent: mine ? 'flex-end' : 'flex-start' }]}
+    >
       <Pressable
         accessibilityLabel={a11y}
         accessibilityHint="Long-press for actions"
@@ -311,6 +346,7 @@ const Bubble = memo(function Bubble({ m, showName, replied, onLongPress, readRec
         delayLongPress={300}
         style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs, { backgroundColor: mine ? colors.bubbleMe : colors.bubbleThem, borderColor: colors.border }]}
       >
+        {mine ? <LinearGradient colors={MY_BUBBLE} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" /> : null}
         {showName ? <Txt variant="caption" color="accent" style={{ fontWeight: '700' }}>{m.senderName}</Txt> : null}
         {m.forwardedFrom ? (
           <View style={styles.inline}><Ionicons name="arrow-redo" size={12} color={muted} /><Txt variant="caption" style={{ color: muted, fontStyle: 'italic' }}>Forwarded from {m.forwardedFrom}</Txt></View>
@@ -333,13 +369,77 @@ const Bubble = memo(function Bubble({ m, showName, replied, onLongPress, readRec
         </View>
       </Pressable>
       {m.reactions.length ? (
-        <View style={[styles.reactions, { backgroundColor: colors.surface, borderColor: colors.border, alignSelf: mine ? 'flex-end' : 'flex-start' }]}>
+        // Re-keyed on change so a new reaction pops in.
+        <Animated.View
+          key={m.reactions.map(r => r.emoji + r.by).join()}
+          entering={mounted.current ? ZoomIn.springify().damping(10) : undefined}
+          style={[styles.reactions, { backgroundColor: colors.surface, borderColor: colors.border, alignSelf: mine ? 'flex-end' : 'flex-start' }]}
+        >
           <Txt variant="caption">{[...new Set(m.reactions.map(r => r.emoji))].join('')}{m.reactions.length > 1 ? ` ${m.reactions.length}` : ''}</Txt>
-        </View>
+        </Animated.View>
       ) : null}
+    </Animated.View>
+  );
+});
+
+/** Soft, theme-aware chat wallpaper: a faint wash plus a sparse doodle pattern. Purely decorative. */
+const DOODLES: { icon: IconName; x: number; y: number; r: number }[] = [
+  { icon: 'chatbubble-outline', x: 6, y: 4, r: -12 }, { icon: 'heart-outline', x: 58, y: 9, r: 10 },
+  { icon: 'star-outline', x: 84, y: 22, r: -6 }, { icon: 'cafe-outline', x: 22, y: 20, r: 8 },
+  { icon: 'musical-note-outline', x: 46, y: 33, r: -14 }, { icon: 'happy-outline', x: 8, y: 42, r: 6 },
+  { icon: 'airplane-outline', x: 74, y: 44, r: 18 }, { icon: 'leaf-outline', x: 30, y: 56, r: -10 },
+  { icon: 'camera-outline', x: 88, y: 63, r: 4 }, { icon: 'sparkles-outline', x: 56, y: 68, r: -4 },
+  { icon: 'moon-outline', x: 12, y: 74, r: 12 }, { icon: 'balloon-outline', x: 40, y: 86, r: -8 },
+  { icon: 'paw-outline', x: 78, y: 88, r: 10 }, { icon: 'pizza-outline', x: 4, y: 94, r: -16 },
+];
+
+const Wallpaper = memo(function Wallpaper() {
+  const { colors, mode } = useTheme();
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      <LinearGradient colors={[colors.bg, colors.accentSoft, colors.bg]} locations={[0, 0.55, 1]} style={StyleSheet.absoluteFill} />
+      {DOODLES.map(d => (
+        <Ionicons
+          key={d.icon}
+          name={d.icon}
+          size={26}
+          color={colors.textMuted}
+          style={{ position: 'absolute', left: `${d.x}%`, top: `${d.y}%`, opacity: mode === 'dark' ? 0.08 : 0.07, transform: [{ rotate: `${d.r}deg` }] }}
+        />
+      ))}
     </View>
   );
 });
+
+/** Send button that morphs from a quiet circle into the brand gradient when there's something to send. */
+function SendButton({ active, editing, onPress }: { active: boolean; editing: boolean; onPress: () => void }) {
+  const { colors } = useTheme();
+  const reduceMotion = useReducedMotion();
+  const on = useSharedValue(active ? 1 : 0);
+  useEffect(() => {
+    on.value = reduceMotion ? (active ? 1 : 0) : withSpring(active ? 1 : 0, { damping: 13, stiffness: 220 });
+  }, [active, reduceMotion, on]);
+  const fill = useAnimatedStyle(() => ({ opacity: on.value, transform: [{ scale: 0.6 + on.value * 0.4 }] }));
+  const icon = useAnimatedStyle(() => ({ transform: [{ rotate: `${(1 - on.value) * -90}deg` }, { scale: 0.85 + on.value * 0.15 }] }));
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={editing ? 'Save edit' : 'Send'}
+      accessibilityState={{ disabled: !active }}
+      disabled={!active}
+      scaleTo={0.88}
+      onPress={onPress}
+      style={[styles.send, { backgroundColor: colors.surfaceAlt }]}
+    >
+      <Animated.View style={[StyleSheet.absoluteFill, styles.sendFill, fill]}>
+        <LinearGradient colors={MY_BUBBLE} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+      </Animated.View>
+      <Animated.View style={icon}>
+        <Ionicons name={editing ? 'checkmark' : 'arrow-up'} size={22} color={active ? '#FFFFFF' : colors.textMuted} />
+      </Animated.View>
+    </PressableScale>
+  );
+}
 
 function AttachmentView({ a, mine }: { a: Attachment; mine: boolean }) {
   const { colors } = useTheme();
@@ -363,11 +463,23 @@ function TypingDots({ name }: { name: string }) {
   const { colors } = useTheme();
   return (
     <View style={[styles.bubbleRow, { justifyContent: 'flex-start' }]} accessibilityLiveRegion="polite" accessibilityLabel={`${name} is typing`}>
-      <View style={[styles.bubble, styles.bubbleTheirs, { backgroundColor: colors.bubbleThem, borderColor: colors.border }]}>
-        <Txt color="textMuted">• • •</Txt>
+      <View style={[styles.bubble, styles.bubbleTheirs, styles.typing, { backgroundColor: colors.bubbleThem, borderColor: colors.border }]}>
+        {[0, 1, 2].map(i => <Dot key={i} index={i} />)}
       </View>
     </View>
   );
+}
+
+function Dot({ index }: { index: number }) {
+  const { colors } = useTheme();
+  const reduceMotion = useReducedMotion();
+  const y = useSharedValue(0);
+  useEffect(() => {
+    if (reduceMotion) return;
+    y.value = withDelay(index * 140, withRepeat(withSequence(withTiming(-5, { duration: 260 }), withTiming(0, { duration: 260 }), withTiming(0, { duration: 320 })), -1));
+  }, [index, reduceMotion, y]);
+  const style = useAnimatedStyle(() => ({ transform: [{ translateY: y.value }], opacity: 0.5 + (-y.value / 5) * 0.5 }));
+  return <Animated.View style={[styles.dot, { backgroundColor: colors.textMuted }, style]} />;
 }
 
 function ForwardSheet({ message, from, onClose }: { message: Message | null; from: Conversation; onClose: () => void }) {
@@ -390,7 +502,7 @@ function ForwardSheet({ message, from, onClose }: { message: Message | null; fro
               const on = picked.includes(item.id);
               return (
                 <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: on }} onPress={() => setPicked(p => (on ? p.filter(x => x !== item.id) : [...p, item.id]))} style={styles.pickRow}>
-                  <Avatar name={item.title} size={36} group={item.kind === 'group'} />
+                  <ChatAvatar conv={item} contacts={state.contacts} size={36} />
                   <Txt style={styles.flex}>{item.title}</Txt>
                   <Ionicons name={on ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={on ? colors.accent : colors.textMuted} />
                 </Pressable>
@@ -430,7 +542,9 @@ const styles = StyleSheet.create({
   system: { paddingHorizontal: space.md, paddingVertical: 6, borderRadius: radius.md, overflow: 'hidden', textAlign: 'center', maxWidth: 520 },
   bubbleRow: { marginVertical: 2 },
   bubble: { maxWidth: '82%', paddingHorizontal: space.md, paddingVertical: space.sm, borderRadius: radius.lg, gap: 4 },
-  bubbleMine: { alignSelf: 'flex-end', borderBottomRightRadius: 6 },
+  bubbleMine: { alignSelf: 'flex-end', borderBottomRightRadius: 6, overflow: 'hidden' },
+  typing: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 14, paddingHorizontal: space.lg },
+  dot: { width: 8, height: 8, borderRadius: 4 },
   bubbleTheirs: { alignSelf: 'flex-start', borderBottomLeftRadius: 6, borderWidth: StyleSheet.hairlineWidth },
   meta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   inline: { flexDirection: 'row', alignItems: 'center', gap: 4 },
@@ -441,11 +555,12 @@ const styles = StyleSheet.create({
   composerWrap: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: space.sm, paddingHorizontal: space.sm, gap: space.sm },
   composer: { flexDirection: 'row', alignItems: 'flex-end', gap: space.xs },
   input: { flex: 1, minHeight: 44, maxHeight: 140, borderRadius: 22, paddingHorizontal: space.lg, paddingTop: 11, paddingBottom: 11 },
-  send: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  send: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  sendFill: { borderRadius: 22, overflow: 'hidden' },
   context: { flexDirection: 'row', alignItems: 'center', borderLeftWidth: 3, borderRadius: radius.sm, paddingLeft: space.md },
   pending: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
   reactRow: { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: space.lg, paddingBottom: space.md },
-  reactBtn: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
+  reactBtn: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
   overlay: { flex: 1, justifyContent: 'flex-end' },
   sheet: { borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingTop: space.lg, width: '100%', maxWidth: 560, alignSelf: 'center' },
   pickRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, paddingVertical: space.sm, minHeight: 52 },

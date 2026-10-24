@@ -6,7 +6,7 @@ import { Button, IconButton } from '@/components/ui';
 export default function InboxScreen() {
   return (
     <SplitInbox
-      title="Inbox"
+      title="Chats"
       tabs={['all', 'unread', 'personal', 'groups', 'connected', 'imported', 'archived']}
       headerActions={
         <>

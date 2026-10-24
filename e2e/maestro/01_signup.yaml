@@ -1,0 +1,78 @@
+# Sign-up: required-field validation, then create the account.
+appId: host.exp.exponent
+name: 01 Sign up
+tags:
+  - signup
+env:
+  USER_NAME: ${USER_NAME || "Maestro Tester"}
+  USER_HANDLE: ${USER_HANDLE || "maestro_tester"}
+  USER_EMAIL: ${USER_EMAIL || "maestro@example.com"}
+---
+- runFlow: subflows/launch.yaml
+
+# Start signed out. If a previous run left an account, delete it in-app
+# (this keeps Expo Go's own data, unlike clearState on host.exp.exponent).
+- runFlow:
+    when:
+      visible: "Inbox"
+    file: subflows/delete_account.yaml
+
+- assertVisible: 'One place\. All your conversations\. Your memories kept\.'
+- takeScreenshot: 01_welcome
+- tapOn: "Get started"
+- assertVisible: "Create your account"
+- assertVisible: "Demo mode"
+
+# 1. Submit empty: all three errors appear.
+- tapOn: "Create account"
+- assertVisible: "Enter at least 2 characters"
+- assertVisible: "3.20 lowercase letters, numbers or _"
+- assertVisible: "Enter an email like name@example.com"
+- takeScreenshot: 01_validation_errors
+
+# 2. Invalid values keep the errors: 1-char name, too-short username, bad email.
+#    Empty inputs are found by their placeholder (unique on screen).
+- tapOn: "How people will see you"
+- inputText: "M"
+- tapOn: "e.g. kannan"
+- inputText: "ab"
+- tapOn: "name@example.com"
+- inputText: "not-an-email"
+- hideKeyboard
+- tapOn: "Create account"
+- assertVisible: "Enter at least 2 characters"
+- assertVisible: "3.20 lowercase letters, numbers or _"
+- assertVisible: "Enter an email like name@example.com"
+
+# 3. Fix each field. Placeholders are gone now, so target the inputs by their
+#    accessibilityLabel. The visible label above shares the text; the input is
+#    the second match. Tap the right edge so the cursor is at the end.
+- tapOn:
+    text: "Your name"
+    index: 1
+    point: "95%,50%"
+- eraseText: 30
+- inputText: ${USER_NAME}
+- tapOn:
+    text: "Username"
+    index: 1
+    point: "95%,50%"
+- eraseText: 30
+- inputText: ${USER_HANDLE}
+- tapOn:
+    text: "Email"
+    index: 1
+    point: "95%,50%"
+- eraseText: 40
+- inputText: ${USER_EMAIL}
+- hideKeyboard
+- takeScreenshot: 01_form_filled
+- tapOn: "Create account"
+
+# 4. Signed in: the demo inbox is seeded.
+- extendedWaitUntil:
+    visible: "Inbox"
+    timeout: 15000
+- assertVisible: "Ava Chen"
+- assertVisible: "Weekend hikers"
+- takeScreenshot: 01_inbox_after_signup

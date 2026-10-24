@@ -1,0 +1,25 @@
+# From the Inbox: Settings > Your data > Delete my account (typing DELETE). Ends on Welcome.
+# Selectors are regexes: single-quoted YAML keeps backslash escapes literal.
+appId: host.exp.exponent
+---
+- runFlow:
+    file: open_more_tab.yaml
+    env:
+      TAB: Settings
+- tapOn: "Your data"
+- scrollUntilVisible:
+    element: "Delete my account"
+- tapOn: "Delete my account"
+- assertVisible: 'Delete your account\?'
+# The visible label and the input's accessibilityLabel are both
+# "Type DELETE to confirm"; the input is the second match.
+- tapOn:
+    text: "Type DELETE to confirm"
+    index: 1
+- inputText: "DELETE"
+# No hideKeyboard here: on Android it presses Back, which closes the dialog
+# if the keyboard is already down.
+- tapOn: "Delete forever"
+- extendedWaitUntil:
+    visible: "Get started"
+    timeout: 15000

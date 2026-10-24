@@ -1,0 +1,67 @@
+# Global search across chats, then archive a chat via long-press and find it in Archive.
+appId: host.exp.exponent
+name: 04 Search and archive
+tags:
+  - search
+  - archive
+env:
+  USER_NAME: ${USER_NAME || "Maestro Tester"}
+  SEARCH_TERM: ${SEARCH_TERM || "rooftop"}
+  ARCHIVE_CHAT: ${ARCHIVE_CHAT || "Rahul Menon"}
+---
+- runFlow:
+    file: subflows/ensure_signed_in.yaml
+    env:
+      USER_NAME: ${USER_NAME}
+
+# --- Global search
+- tapOn: "Search all messages"
+- assertVisible: "Search across everything"
+- tapOn: "Search messages"
+- inputText: ${SEARCH_TERM}
+- extendedWaitUntil:
+    visible: "\\d+ results?"
+    timeout: 5000
+# Each hit's accessibility label is "<sender> in <conversation>: <text>".
+- assertVisible: "Ava Chen in Ava Chen: .*${SEARCH_TERM}.*"
+- takeScreenshot: 04_search_results
+- tapOn: "hye chats"
+- assertVisible: "Ava Chen in Ava Chen: .*${SEARCH_TERM}.*"
+- tapOn: "Ava Chen in Ava Chen: .*${SEARCH_TERM}.*"
+- assertVisible: ".*rooftop place near the station.*"
+- tapOn: "Back"
+# No-results state
+- tapOn: "Search messages"
+- eraseText: 30
+- inputText: "zzqxnomatch"
+- assertVisible: "No results for .zzqxnomatch."
+- hideKeyboard
+- tapOn: "Back"
+- assertVisible: "Inbox"
+
+# --- Archive via long-press on the inbox row
+- assertVisible: ${ARCHIVE_CHAT}
+- longPressOn: ${ARCHIVE_CHAT}
+- assertVisible: "Pin to top|Unpin"
+- takeScreenshot: 04_row_menu
+- tapOn: "Archive"
+- assertNotVisible: ${ARCHIVE_CHAT}
+- takeScreenshot: 04_archived_gone_from_inbox
+
+# --- It's in the Archive tab (under "More" on phones)
+- runFlow:
+    file: subflows/open_more_tab.yaml
+    env:
+      TAB: Archive
+- assertVisible: "Archive"
+- assertVisible: ${ARCHIVE_CHAT}
+# Seeded archived chat is there too.
+- assertVisible: "Sara Ibrahim"
+- takeScreenshot: 04_archive_tab
+
+# --- Clean up: move it back to the inbox
+- longPressOn: ${ARCHIVE_CHAT}
+- tapOn: "Move to inbox"
+- assertNotVisible: ${ARCHIVE_CHAT}
+- tapOn: "Inbox(, \\d+ unread)?"
+- assertVisible: ${ARCHIVE_CHAT}

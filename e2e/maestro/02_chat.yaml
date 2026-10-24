@@ -1,0 +1,91 @@
+# 1:1 chat with the demo contact Ava Chen: send, simulated typing/reply, react,
+# reply, edit and delete for everyone.
+# Maestro's inputText on Android is ASCII-only, so typed messages avoid emoji.
+# Selectors are regexes: keep test messages free of regex characters (. ? ( ) etc.).
+appId: host.exp.exponent
+name: 02 Chat with Ava
+tags:
+  - chat
+env:
+  USER_NAME: ${USER_NAME || "Maestro Tester"}
+  FIRST_MSG: ${FIRST_MSG || "Hello from Maestro"}
+  REPLY_MSG: ${REPLY_MSG || "Yes 7pm works"}
+  EDITED_MSG: ${EDITED_MSG || "Yes 730pm works better"}
+---
+- runFlow:
+    file: subflows/ensure_signed_in.yaml
+    env:
+      USER_NAME: ${USER_NAME}
+
+- tapOn: "Ava Chen"
+- assertVisible: "Demo contact · simulated replies"
+- assertVisible: 'Booking for 7pm\?'
+
+# --- Send
+- tapOn: "Message"
+- inputText: ${FIRST_MSG}
+- tapOn: "Send"
+- assertVisible: ${FIRST_MSG}
+- takeScreenshot: 02_sent
+
+# --- Simulated reply: "Ava is typing…" after ~1.8s, reply at ~3.6s.
+# Demo contacts skip replying ~25% of the time, so these two waits are optional.
+- extendedWaitUntil:
+    visible: "Ava is typing.*|Ava Chen is typing"
+    timeout: 8000
+    optional: true
+    label: Typing indicator (optional, demo replies are random)
+- takeScreenshot: 02_typing
+- extendedWaitUntil:
+    visible: 'Sounds good.*|Give me a minute, just finishing something\.|Ha, yes!|Can we talk about it tomorrow\?|Sent you the details\.|Perfect, thanks!'
+    timeout: 10000
+    optional: true
+    label: Simulated reply from Ava (optional)
+# Delivery/read ticks are part of the bubble's accessibility label.
+- extendedWaitUntil:
+    visible: "You, .*: ${FIRST_MSG}.*, (delivered|read)"
+    timeout: 8000
+- takeScreenshot: 02_reply
+
+# --- React (long-press opens the action sheet with quick reactions)
+- longPressOn: ${FIRST_MSG}
+- assertVisible: "Reply"
+- tapOn: "React with 👍"
+- assertVisible: "You, .*: ${FIRST_MSG}.*reactions 👍.*"
+- takeScreenshot: 02_reacted
+
+# --- Reply to Ava's message
+- longPressOn: 'Booking for 7pm\?'
+- tapOn: "Reply"
+- assertVisible: "Replying to Ava Chen"
+- tapOn: "Message"
+- inputText: ${REPLY_MSG}
+- tapOn: "Send"
+- assertVisible: ${REPLY_MSG}
+- assertNotVisible: "Replying to Ava Chen"
+- takeScreenshot: 02_replied
+
+# --- Edit our reply. The app pre-fills and focuses the composer; tap its right
+# edge so the cursor sits at the end before erasing.
+- longPressOn: ${REPLY_MSG}
+- tapOn: "Edit"
+- assertVisible: "Editing message"
+- tapOn:
+    text: "Message"
+    point: "95%,50%"
+- eraseText: 60
+- inputText: ${EDITED_MSG}
+- tapOn: "Save edit"
+- assertVisible: ${EDITED_MSG}
+- assertVisible: "You, .*: ${EDITED_MSG}, edited.*"
+- takeScreenshot: 02_edited
+
+# --- Delete the first message for everyone
+- longPressOn: ${FIRST_MSG}
+- tapOn: "Delete for everyone"
+- assertVisible: "This message was deleted"
+- assertNotVisible: ${FIRST_MSG}
+- takeScreenshot: 02_deleted
+
+- tapOn: "Back"
+- assertVisible: "Inbox"

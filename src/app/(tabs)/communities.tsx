@@ -3,7 +3,8 @@ import { useMemo } from 'react';
 import { View } from 'react-native';
 
 import { Screen } from '@/components/Screen';
-import { Avatar, Banner, Button, Card, Divider, EmptyState, Row, SectionTitle } from '@/components/ui';
+import { Banner, Button, Card, Divider, EmptyState, Row, SectionTitle } from '@/components/ui';
+import { ChatAvatar } from '@/features/chats/ChatAvatar';
 import { useStore } from '@/state/store';
 import { formatListTime } from '@/utils/time';
 
@@ -30,7 +31,7 @@ export default function CommunitiesScreen() {
                 <Row
                   label={g.title}
                   detail={`${g.members.length} members · active ${formatListTime(g.lastActivityAt)}${adminOf.includes(g) ? ' · you’re an admin' : ''}`}
-                  right={<Avatar name={g.title} size={32} group />}
+                  right={<ChatAvatar conv={g} contacts={state.contacts} size={40} />}
                   onPress={() => router.push({ pathname: '/conversation/[id]', params: { id: g.id } })}
                 />
               </View>

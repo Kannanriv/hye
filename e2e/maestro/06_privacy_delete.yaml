@@ -1,0 +1,96 @@
+# Privacy and data rights: toggle read receipts, export data (cancel the share
+# sheet), then delete the account (requires typing DELETE) and land on Welcome.
+# Run this journey last: it removes the account.
+appId: host.exp.exponent
+name: 06 Privacy, export and delete account
+tags:
+  - privacy
+  - destructive
+env:
+  USER_NAME: ${USER_NAME || "Maestro Tester"}
+---
+- runFlow:
+    file: subflows/ensure_signed_in.yaml
+    env:
+      USER_NAME: ${USER_NAME}
+
+- runFlow:
+    file: subflows/open_more_tab.yaml
+    env:
+      TAB: Settings
+- assertVisible: "Settings"
+- assertVisible: "@.*"
+
+# --- Privacy > Read receipts (the Switch carries the accessibilityLabel)
+- tapOn: "Privacy"
+- assertVisible: "Read receipts"
+- assertVisible:
+    text: "Read receipts"
+    checked: true
+- tapOn:
+    text: "Read receipts"
+    checked: true
+- assertVisible:
+    text: "Read receipts"
+    checked: false
+- takeScreenshot: 06_read_receipts_off
+- tapOn: "Back"
+
+# The change is logged in Security activity.
+- tapOn: "Security activity"
+- assertVisible: "privacy.changed"
+- assertVisible: "readReceipts=false.*"
+- tapOn: "Back"
+
+# --- Your data > Export my data, then cancel the Android share sheet
+- tapOn: "Your data"
+- assertVisible: "Export my data"
+- tapOn: "Export my data"
+- extendedWaitUntil:
+    visible: "Share|Save your hye data|Quick Share|Nearby Share|Copy|.*hye-export.*|Export created.*"
+    timeout: 10000
+    optional: true
+    label: Wait for the system share sheet
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: 06_share_sheet
+# Back dismisses the share sheet. Skip it if sharing wasn't available
+# (the app shows "Export created..." instead), or Back would leave the page.
+- runFlow:
+    when:
+      notVisible: "Export created.*"
+    commands:
+      - back
+- extendedWaitUntil:
+    visible: "Export my data"
+    timeout: 10000
+
+# --- Delete account: confirm stays disabled until DELETE is typed
+- scrollUntilVisible:
+    element: "Delete my account"
+- tapOn: "Delete my account"
+- assertVisible: 'Delete your account\?'
+- assertVisible: "Delete forever"
+- takeScreenshot: 06_delete_dialog
+# Disabled: tapping does nothing.
+- tapOn: "Delete forever"
+- assertVisible: 'Delete your account\?'
+# Wrong word: still disabled.
+- tapOn:
+    text: "Type DELETE to confirm"
+    index: 1
+- inputText: "DELE"
+- tapOn: "Delete forever"
+- assertVisible: 'Delete your account\?'
+# Correct word (no hideKeyboard: Android Back would close the dialog).
+- inputText: "TE"
+- takeScreenshot: 06_delete_typed
+- tapOn: "Delete forever"
+
+# --- Back to the welcome screen, account gone
+- extendedWaitUntil:
+    visible: "Get started"
+    timeout: 15000
+- assertVisible: "hye"
+- assertNotVisible: "Inbox"
+- takeScreenshot: 06_welcome_after_delete

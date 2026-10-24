@@ -1,0 +1,70 @@
+# Create a group, open its details, rename it and make a member admin.
+appId: host.exp.exponent
+name: 03 Group
+tags:
+  - group
+env:
+  USER_NAME: ${USER_NAME || "Maestro Tester"}
+  GROUP_NAME: ${GROUP_NAME || "Maestro crew"}
+  GROUP_RENAMED: ${GROUP_RENAMED || "Maestro crew renamed"}
+---
+- runFlow:
+    file: subflows/ensure_signed_in.yaml
+    env:
+      USER_NAME: ${USER_NAME}
+
+# --- New conversation > Group
+- tapOn: "New conversation"
+- assertVisible: "New conversation"
+- tapOn: "Group"
+- assertVisible: "New group"
+- assertVisible: "Pick at least one person"
+
+- tapOn: "e.g. Family"
+- inputText: ${GROUP_NAME}
+- hideKeyboard
+- tapOn: "Ava Chen, demo contact"
+- tapOn: "Rahul Menon, demo contact"
+- assertVisible: "Create group with 2 people"
+- takeScreenshot: 03_new_group
+- tapOn: "Create group with 2 people"
+
+# --- The new group conversation (curly quotes matched with ".")
+- assertVisible: "You created .${GROUP_NAME}."
+- assertVisible: "You, Ava, Rahul"
+- takeScreenshot: 03_group_created
+
+# --- Details > Rename group
+- tapOn: "Conversation details"
+- assertVisible: "Group · 3 members"
+- tapOn: "Rename group"
+- assertVisible: 'Everyone in the group will see the new name\.'
+- tapOn:
+    text: "Group name"
+    point: "95%,50%"
+- eraseText: 70
+- inputText: ${GROUP_RENAMED}
+- tapOn: "Save"
+- assertVisible: ${GROUP_RENAMED}
+- takeScreenshot: 03_renamed
+
+# --- Make Rahul an admin
+- scrollUntilVisible:
+    element: "Rahul Menon"
+- tapOn: "Rahul Menon"
+- tapOn: "Make admin"
+# Re-open his menu: the action now reads "Remove as admin".
+- tapOn: "Rahul Menon"
+- assertVisible: "Remove as admin"
+- takeScreenshot: 03_admin_menu
+# Close the sheet (system Back closes RN modals on Android).
+- back
+- assertNotVisible: "Remove as admin"
+
+# --- System notes in the conversation record both changes.
+- tapOn: "Back"
+- assertVisible: "Rahul Menon is now an admin"
+- assertVisible: "You renamed the group to .${GROUP_RENAMED}."
+- takeScreenshot: 03_group_notes
+- tapOn: "Back"
+- assertVisible: "Inbox"

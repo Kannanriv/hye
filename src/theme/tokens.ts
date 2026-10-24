@@ -54,6 +54,14 @@ export const palette = {
 
 export type Colors = typeof palette.light;
 
+/** Brand gradient (indigo → violet → pink). Use for primary CTAs, story rings and celebrations only. */
+export const gradients = {
+  brand: ['#4F46E5', '#7C3AED', '#DB2777'] as const,
+  sunset: ['#F59E0B', '#EF4444', '#DB2777'] as const,
+  ocean: ['#0EA5E9', '#4F46E5'] as const,
+  scrim: ['transparent', 'rgba(0,0,0,0.75)'] as const,
+};
+
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 };
 export const radius = { sm: 8, md: 12, lg: 18, pill: 999 };
 export const type = {

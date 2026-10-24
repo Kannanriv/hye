@@ -1,0 +1,22 @@
+# Maestro workspace config for hye on a USB-connected Android phone running Expo Go.
+# Docs: https://docs.maestro.dev/reference/workspace-configuration
+#
+# Run via ./run.ps1 or ./run.sh (they set up adb reverse, push the fixture and
+# write results to ./artifacts). Plain `maestro test e2e/maestro` also works.
+
+# Only the numbered journeys are top-level tests; subflows/ are called with runFlow.
+flows:
+  - "0*.yaml"
+
+# Each journey can run on its own (they call subflows/ensure_signed_in.yaml),
+# but this order is the natural story and 06 ends by deleting the account.
+executionOrder:
+  continueOnFailure: true
+  flowsOrder:
+    - 00_launch
+    - 01_signup
+    - 02_chat
+    - 03_group
+    - 04_search_archive
+    - 05_import
+    - 06_privacy_delete

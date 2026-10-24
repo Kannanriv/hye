@@ -7,7 +7,7 @@ import { reducer } from '../store';
 const NOW = Date.parse('2026-10-24T12:00:00.000Z');
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
 
-const user: User = { id: 'usr_1', displayName: 'Kannan T', handle: 'kannan', email: 'k@example.com', createdAt: ago(0) };
+const user: User = { id: 'usr_1', displayName: 'Kannan T', handle: 'kannan', phone: '+919876543210', createdAt: ago(0) };
 
 function conv(id: string, extra: Partial<Conversation> = {}): Conversation {
   return {
@@ -35,11 +35,14 @@ describe('reducer: signUp', () => {
     expect(s.audit).toEqual([]);
     expect(s.contacts).toEqual(DEMO_CONTACTS);
     expect(s.contacts.every(c => c.isDemo)).toBe(true);
-    expect(s.conversations.map(c => c.id)).toEqual(['cv_ava', 'cv_rahul', 'cv_weekend', 'cv_design', 'cv_sara']);
+    expect(s.conversations.map(c => c.id).slice(0, 5)).toEqual(['cv_ava', 'cv_rahul', 'cv_weekend', 'cv_design', 'cv_sara']);
+    expect(s.conversations.some(c => c.id.startsWith('cv_x_'))).toBe(true);
+    expect(s.posts.length).toBeGreaterThan(0);
+    expect(s.posts.every(p => p.simulated)).toBe(true);
     expect(s.conversations.every(c => c.origin === 'native')).toBe(true);
     expect(s.conversations.find(c => c.id === 'cv_ava')!.pinned).toBe(true);
     expect(s.conversations.find(c => c.id === 'cv_sara')!.archived).toBe(true);
-    expect(s.messages.length).toBe(11);
+    expect(s.messages.length).toBeGreaterThan(11);
     expect(s.messages[0].text).toContain('Hi Kannan!');
     expect(new Set(s.messages.map(m => m.id)).size).toBe(s.messages.length);
   });
@@ -166,9 +169,19 @@ describe('reducer: reset and misc', () => {
     expect(s.user).toBeNull();
   });
 
-  it('hydrate replaces state', () => {
-    const next = { ...initialState, user };
-    expect(reducer(initialState, { type: 'hydrate', state: next })).toBe(next);
+  it('hydrate returns state as-is when signed out or already migrated (has posts)', () => {
+    const signedOut = { ...initialState };
+    expect(reducer(initialState, { type: 'hydrate', state: signedOut })).toBe(signedOut);
+    const current = { ...reducer(initialState, { type: 'signUp', user }), posts: [{ id: 'p1' }] } as unknown as AppState;
+    expect(reducer(initialState, { type: 'hydrate', state: current })).toBe(current);
+  });
+
+  it('hydrate migrates an older signed-in state (no posts), keeping user, messages and adding demo contacts', () => {
+    const old = { ...initialState, user, contacts: [], posts: [], messages: [msg('keep', 'c')] } as AppState;
+    const s = reducer(initialState, { type: 'hydrate', state: old });
+    expect(s.user).toMatchObject(user);
+    expect(s.messages.map(m => m.id)).toContain('keep');
+    expect(s.contacts.map(c => c.id)).toEqual(expect.arrayContaining(DEMO_CONTACTS.map(c => c.id)));
   });
 
   it('audit keeps newest first and caps at 500', () => {

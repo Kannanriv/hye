@@ -31,7 +31,7 @@ export default function SettingsScreen() {
         <Avatar name={user.displayName} size={56} />
         <View style={{ flex: 1 }}>
           <Txt variant="heading">{user.displayName}</Txt>
-          <Txt variant="small" color="textMuted">@{user.handle} · {user.email}</Txt>
+          <Txt variant="small" color="textMuted">{[user.handle && `@${user.handle}`, user.phone].filter(Boolean).join(' · ')}</Txt>
         </View>
       </Card>
       {PAGES.map((group, gi) => (

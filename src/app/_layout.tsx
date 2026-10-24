@@ -4,8 +4,18 @@ import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { Button, EmptyState } from '@/components/ui';
+import { AchievementWatcher } from '@/features/gamification/useAchievementWatcher';
+import { usePhotosSimulation } from '@/features/photos/simulation';
+import { usePostsSimulation } from '@/features/posts/simulation';
 import { StoreProvider, useStore } from '@/state/store';
 import { ThemeProvider, useTheme } from '@/theme/useTheme';
+
+/** App-wide background services for signed-in users: demo activity and achievement celebrations. */
+function SignedInServices() {
+  usePostsSimulation();
+  usePhotosSimulation();
+  return <AchievementWatcher />;
+}
 
 function RootStack() {
   const { state, ready, loadError, startFresh } = useStore();
@@ -46,8 +56,16 @@ function RootStack() {
           <Stack.Screen name="search" />
           <Stack.Screen name="integration/[platform]" />
           <Stack.Screen name="settings/[page]" />
+          <Stack.Screen name="achievements" />
+          <Stack.Screen name="post/[id]" />
+          <Stack.Screen name="post/compose" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="photo/[id]" />
+          <Stack.Screen name="photo/new" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="reel/new" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="story/[contactId]" options={{ presentation: 'fullScreenModal', animation: 'fade' }} />
         </Stack.Protected>
       </Stack>
+      {signedIn ? <SignedInServices /> : null}
     </>
   );
 }

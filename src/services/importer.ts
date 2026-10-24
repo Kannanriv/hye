@@ -191,3 +191,21 @@ export async function writeShareFile(name: string, data: unknown): Promise<strin
   await f.write(JSON.stringify(data, null, 2));
   return f.uri;
 }
+
+/**
+ * Copies a picked file (usually in the OS-managed cache) into app storage so it survives
+ * cache clearing. Returns the original URI on web or if the copy fails.
+ */
+export function keepFile(uri: string, folder: string): string {
+  if (Platform.OS === 'web') return uri;
+  try {
+    const dir = new Directory(Paths.document, 'media', folder);
+    if (!dir.exists) dir.create({ intermediates: true });
+    const ext = /\.[a-z0-9]{2,5}$/i.exec(uri)?.[0] ?? '.jpg';
+    const target = new File(dir, `${Date.now()}${ext}`);
+    new File(uri).copy(target);
+    return target.uri;
+  } catch {
+    return uri;
+  }
+}

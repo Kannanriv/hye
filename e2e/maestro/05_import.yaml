@@ -1,0 +1,124 @@
+# Import a WhatsApp export from the phone's Downloads folder.
+#
+# Prereq: the fixture is on the phone (run.ps1 / run.sh do this):
+#   adb push "e2e/fixtures/WhatsApp Chat with Priya.txt" /sdcard/Download/
+#
+# The file picker is Android's DocumentsUI, not hye. Its layout differs between
+# Android versions and depends on where it last opened (Recent, Downloads, a
+# grid or list view), so the picker steps are conditional/optional and match
+# on text only.
+appId: host.exp.exponent
+name: 05 Import WhatsApp export
+tags:
+  - import
+env:
+  USER_NAME: ${USER_NAME || "Maestro Tester"}
+  # Who "you" are inside the export (the fixture's participants are Priya and Kannan).
+  ME_IN_EXPORT: ${ME_IN_EXPORT || "Kannan"}
+  EXPORT_FILE: ${EXPORT_FILE || "WhatsApp Chat with Priya"}
+  CHAT_TITLE: ${CHAT_TITLE || "Priya"}
+---
+- runFlow:
+    file: subflows/ensure_signed_in.yaml
+    env:
+      USER_NAME: ${USER_NAME}
+
+# --- Import > WhatsApp > guide
+- tapOn: "Import chat history"
+- assertVisible: "Import history"
+- assertVisible: "Choose where your chat is from"
+- tapOn: "WhatsApp"
+- assertVisible: "Export from WhatsApp"
+- scrollUntilVisible:
+    element: "Choose export file"
+- takeScreenshot: 05_guide
+- tapOn: "Choose export file"
+
+# --- Android file picker (DocumentsUI)
+- extendedWaitUntil:
+    visible: "${EXPORT_FILE}.*|Recent|Downloads?|Show roots|Search|Files"
+    timeout: 15000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: 05_picker_opened
+# Not already in Downloads? Open the drawer ("Show roots") and pick Downloads.
+- runFlow:
+    when:
+      notVisible: "${EXPORT_FILE}.*"
+    commands:
+      - tapOn:
+          text: "Show roots"
+          optional: true
+      - tapOn:
+          text: "Downloads?"
+          optional: true
+      - waitForAnimationToEnd:
+          timeout: 3000
+# Still not visible (long Downloads folder)? Scroll the list.
+- runFlow:
+    when:
+      notVisible: "${EXPORT_FILE}.*"
+    commands:
+      - scrollUntilVisible:
+          element: "${EXPORT_FILE}.*"
+          timeout: 10000
+          optional: true
+# Last resort: the picker's own search.
+- runFlow:
+    when:
+      notVisible: "${EXPORT_FILE}.*"
+    commands:
+      - tapOn:
+          text: "Search"
+          optional: true
+      - inputText: "Priya"
+      - pressKey: enter
+      - waitForAnimationToEnd:
+          timeout: 3000
+- takeScreenshot: 05_picker_file
+# If earlier runs left copies ("... (1).txt"), the first match is fine.
+- tapOn: "${EXPORT_FILE}.*"
+
+# --- Review
+- extendedWaitUntil:
+    visible: "Review before importing"
+    timeout: 30000
+- assertVisible: ${CHAT_TITLE}
+- assertVisible: ".*2 participants"
+- assertVisible: "Which one is you\\?"
+# Pick "you". If the account name equals the export name the app pre-selects it,
+# and tapping again would deselect, so only tap when they differ.
+- scrollUntilVisible:
+    element: ${ME_IN_EXPORT}
+- runFlow:
+    when:
+      true: ${USER_NAME.toLowerCase() != ME_IN_EXPORT.toLowerCase()}
+    commands:
+      - tapOn: ${ME_IN_EXPORT}
+- scrollUntilVisible:
+    element: "\\d+ messages"
+- takeScreenshot: 05_review
+- scrollUntilVisible:
+    element: "Import [\\d,]+ items"
+- tapOn: "Import [\\d,]+ items"
+
+# --- Report
+- extendedWaitUntil:
+    visible: "Import complete|Imported with some problems"
+    timeout: 60000
+- assertVisible: "Import report"
+- assertVisible: "Imported"
+- assertVisible: "Skipped"
+- assertVisible: "Failed"
+- takeScreenshot: 05_report
+
+# --- Open the conversation: imported history is clearly labelled and read-only.
+- tapOn: "Open conversation"
+- assertVisible: "Imported from a WhatsApp export"
+- assertVisible: "History only.*"
+- assertVisible: "\\d+ participants · history only"
+- assertVisible: ".*marmalade sunsets.*"
+- assertNotVisible: "Send"
+- takeScreenshot: 05_imported_conversation
+- tapOn: "Back"
+- assertVisible: "Inbox"

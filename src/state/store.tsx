@@ -2,9 +2,10 @@ import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, 
 
 import { newId } from '@/domain/hash';
 import type {
-  AppState, Attachment, AuditEvent, Contact, Conversation, ImportJob, Message, NotificationPrefs, PrivacySettings, SavedLink, User,
+  AppState, Attachment, AuditEvent, Comment, Contact, Conversation, ImportJob, Message, NotificationPrefs, Post, PrivacySettings, SavedLink, User,
 } from '@/domain/types';
-import { DEMO_REPLIES, demoWorld, initialState } from './demo';
+import { demoExtraChats } from '@/features/chats/demo';
+import { DEMO_CONTACTS, DEMO_REPLIES, demoPosts, demoWorld, initialState } from './demo';
 import { clearStorage, loadState, PersistedChunks, saveState } from './persistence';
 import { expiredMessageIds } from './selectors';
 
@@ -29,12 +30,45 @@ type Action =
   | { type: 'theme'; theme: AppState['theme'] }
   | { type: 'audit'; event: AuditEvent }
   | { type: 'applyRetention' }
-  | { type: 'reset' };
+  | { type: 'reset' }
+  | { type: 'patchUser'; patch: Partial<User> }
+  | { type: 'addPost'; post: Post }
+  | { type: 'patchPost'; id: string; patch: Partial<Post> }
+  | { type: 'deletePost'; id: string }
+  | { type: 'toggleLike'; id: string; by?: string }
+  | { type: 'toggleRepost'; id: string; by?: string }
+  | { type: 'toggleSave'; id: string }
+  | { type: 'addComment'; id: string; comment: Comment }
+  | { type: 'viewPost'; id: string }
+  | { type: 'toggleFollow'; contactId: string }
+  | { type: 'awardXp'; amount: number }
+  | { type: 'unlockAchievements'; ids: string[] }
+  | { type: 'markCelebrated'; id: string }
+  | { type: 'delight'; patch: Partial<AppState['delight']> };
+
+const toggle = (list: string[], who: string) => (list.includes(who) ? list.filter(x => x !== who) : [...list, who]);
+const mapPost = (s: AppState, id: string, fn: (p: Post) => Post): AppState => ({ ...s, posts: s.posts.map(p => (p.id === id ? fn(p) : p)) });
 
 export function reducer(s: AppState, a: Action): AppState {
   switch (a.type) {
-    case 'hydrate':
-      return a.state;
+    case 'hydrate': {
+      // Accounts created before posts existed get the demo social content and richer demo profiles.
+      let st = a.state;
+      if (!st.user) return st;
+      if (!st.posts.length) {
+        const known = new Set(st.contacts.map(c => c.id));
+        const contacts = [
+          ...st.contacts.map(c => ({ ...DEMO_CONTACTS.find(d => d.id === c.id), ...c, avatarUrl: c.avatarUrl ?? DEMO_CONTACTS.find(d => d.id === c.id)?.avatarUrl })),
+          ...DEMO_CONTACTS.filter(d => !known.has(d.id)),
+        ] as Contact[];
+        st = { ...st, contacts, posts: demoPosts(), user: { ...st.user, phone: st.user.phone ?? '' } };
+      }
+      if (!st.conversations.some(c => c.id.startsWith('cv_x_'))) {
+        const extra = demoExtraChats(st.user!, Date.now());
+        st = { ...st, conversations: [...st.conversations, ...extra.conversations], messages: [...st.messages, ...extra.messages] };
+      }
+      return st;
+    }
     case 'signUp':
       return { ...initialState, user: a.user, ...demoWorld(a.user), theme: s.theme };
     case 'addMessages': {
@@ -107,6 +141,39 @@ export function reducer(s: AppState, a: Action): AppState {
     }
     case 'reset':
       return { ...initialState };
+    case 'patchUser':
+      return s.user ? { ...s, user: { ...s.user, ...a.patch } } : s;
+    case 'addPost':
+      return { ...s, posts: [a.post, ...s.posts] };
+    case 'patchPost':
+      return mapPost(s, a.id, p => ({ ...p, ...a.patch }));
+    case 'deletePost':
+      return { ...s, posts: s.posts.filter(p => p.id !== a.id) };
+    case 'toggleLike':
+      return mapPost(s, a.id, p => ({ ...p, likes: toggle(p.likes, a.by ?? 'me') }));
+    case 'toggleRepost':
+      return mapPost(s, a.id, p => ({ ...p, reposts: toggle(p.reposts, a.by ?? 'me') }));
+    case 'toggleSave':
+      return mapPost(s, a.id, p => ({ ...p, saved: !p.saved }));
+    case 'addComment':
+      return mapPost(s, a.id, p => ({ ...p, comments: [...p.comments, a.comment] }));
+    case 'viewPost':
+      return mapPost(s, a.id, p => ({ ...p, views: p.views + 1 }));
+    case 'toggleFollow':
+      return { ...s, contacts: s.contacts.map(c => (c.id === a.contactId ? { ...c, following: !c.following } : c)) };
+    case 'awardXp':
+      return s.delight.gamification ? { ...s, progress: { ...s.progress, xp: s.progress.xp + a.amount } } : s;
+    case 'unlockAchievements': {
+      const have = new Set(s.progress.achievements.map(x => x.id));
+      const fresh = a.ids.filter(id => !have.has(id));
+      if (!fresh.length) return s;
+      const at = new Date().toISOString();
+      return { ...s, progress: { ...s.progress, achievements: [...s.progress.achievements, ...fresh.map(id => ({ id, unlockedAt: at }))] } };
+    }
+    case 'markCelebrated':
+      return { ...s, progress: { ...s.progress, celebrated: [...s.progress.celebrated, a.id] } };
+    case 'delight':
+      return { ...s, delight: { ...s.delight, ...a.patch } };
   }
 }
 

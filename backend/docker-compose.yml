@@ -1,0 +1,88 @@
+# Local dependencies for the hye backend. The API itself runs on the host (npm run start:dev)
+# or as the `api` service via the optional "app" profile:
+#   docker compose up -d                      # postgres, redis, minio, clamav
+#   docker compose --profile app up -d --build  # ...plus the API container
+# Credentials here are for local development only.
+name: hye
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: hye
+      POSTGRES_PASSWORD: hye
+      POSTGRES_DB: hye
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hye -d hye"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["6379:6379"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: hye-minio
+      MINIO_ROOT_PASSWORD: change-me-minio-secret
+    ports: ["9000:9000", "9001:9001"]   # S3 API, web console
+    volumes: [miniodata:/data]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Creates the media bucket once MinIO is up (private: objects are served via signed URLs).
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio: { condition: service_healthy }
+    entrypoint: >
+      /bin/sh -c "mc alias set local http://minio:9000 hye-minio change-me-minio-secret &&
+                  mc mb --ignore-existing local/hye-media && mc anonymous set none local/hye-media"
+    restart: "no"
+
+  clamav:
+    image: clamav/clamav:stable
+    ports: ["3310:3310"]               # clamd; first start downloads signatures (a few minutes)
+    volumes: [clamdb:/var/lib/clamav]
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 300s
+
+  api:
+    profiles: ["app"]
+    build: .
+    env_file: [.env]
+    environment:
+      PERSISTENCE: postgres
+      DATABASE_URL: postgres://hye:hye@postgres:5432/hye
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      CLAMAV_HOST: clamav
+    ports: ["3000:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
+  clamdb:

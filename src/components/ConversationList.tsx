@@ -1,16 +1,21 @@
 import { Ionicons } from '@expo/vector-icons';
 import { memo, ReactNode, useCallback, useMemo, useState } from 'react';
 import { FlatList, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import Animated, { FadeIn, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { Conversation, SourcePlatform } from '@/domain/types';
+import type { Contact, Conversation, SourcePlatform } from '@/domain/types';
+import { ActiveNow } from '@/features/chats/ActiveNow';
+import { ChatAvatar } from '@/features/chats/ChatAvatar';
+import { useDirectChat } from '@/features/chats/useDirectChat';
 import { deleteImportFiles } from '@/services/importer';
 import { defaultFilters, InboxFilters, InboxRow, InboxTab, inboxRows, messagesByConversation, previewText } from '@/state/selectors';
 import { useStore } from '@/state/store';
 import { radius, space, type } from '@/theme/tokens';
 import { useTheme } from '@/theme/useTheme';
 import { formatListTime } from '@/utils/time';
-import { ActionSheet, Avatar, Button, Chip, ConfirmDialog, EmptyState, IconName, platformLabel, SheetFrame, SourceBadge, Tag, Txt } from './ui';
+import { PressableScale } from './premium';
+import { ActionSheet, Button, Chip, ConfirmDialog, EmptyState, IconName, platformLabel, SheetFrame, SourceBadge, Tag, Txt } from './ui';
 
 const TAB_LABELS: Record<InboxTab, string> = {
   all: 'All', unread: 'Unread', personal: 'Personal', groups: 'Groups', connected: 'Connected', imported: 'Imported', archived: 'Archived',
@@ -26,7 +31,7 @@ export function ConversationList({ title, tabs, nativeOnly, initialTab = 'all', 
   headerActions?: ReactNode;
   emptyAction?: ReactNode;
 }) {
-  const { state, dispatch, audit } = useStore();
+  const { state, dispatch, audit, typing } = useStore();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [filters, setFilters] = useState<InboxFilters>({ ...defaultFilters, tab: initialTab, nativeOnly });
@@ -44,18 +49,32 @@ export function ConversationList({ title, tabs, nativeOnly, initialTab = 'all', 
 
   const patch = useCallback((id: string, p: Partial<Conversation>) => dispatch({ type: 'patchConversation', id, patch: p }), [dispatch]);
   const demoIds = useMemo(() => new Set(state.contacts.filter(c => c.isDemo).map(c => c.id)), [state.contacts]);
+  const typingConv = typing && state.privacy.typingIndicators ? typing.conversationId : null;
+  const typingName = typing?.name.split(' ')[0];
   const renderItem = useCallback(
     ({ item }: { item: InboxRow }) => (
       <ConversationRow
         row={item}
+        contacts={state.contacts}
         demo={item.conversation.origin === 'native' && item.conversation.members.some(m => demoIds.has(m.contactId))}
         selected={item.conversation.id === selectedId}
+        typingName={item.conversation.id === typingConv ? typingName : undefined}
         onPress={onOpen}
         onLongPress={setMenuFor}
       />
     ),
-    [selectedId, onOpen, demoIds],
+    [selectedId, onOpen, demoIds, state.contacts, typingConv, typingName],
   );
+
+  // "Active now" is simulated presence for demo contacts only, and labelled as such.
+  const openDirect = useDirectChat();
+  const active = useMemo(() => state.contacts.filter(c => c.isDemo && !c.blocked).slice(0, 10), [state.contacts]);
+  const showActive = !filters.query && (filters.tab === 'all' || filters.tab === 'personal') && active.length > 0;
+  const pickActive = useCallback((contactId: string) => {
+    const id = openDirect(contactId);
+    if (id) onOpen(id);
+  }, [openDirect, onOpen]);
+  const listHeader = useMemo(() => (showActive ? <ActiveNow contacts={active} onPick={pickActive} /> : undefined), [showActive, active, pickActive]);
 
   const empty = filters.query || activeFilterCount
     ? <EmptyState icon="search" title="No matches" body="Try a different word or clear your filters." action={<Button label="Clear filters" variant="secondary" compact onPress={() => setFilters({ ...defaultFilters, tab: filters.tab, nativeOnly })} />} />
@@ -73,7 +92,7 @@ export function ConversationList({ title, tabs, nativeOnly, initialTab = 'all', 
   return (
     <View style={[styles.container, { backgroundColor: colors.surface, paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Txt variant="title" style={{ flex: 1 }}>{title}</Txt>
+        <Txt variant="title" style={styles.bigTitle} numberOfLines={1}>{title}</Txt>
         {headerActions}
       </View>
       <View style={[styles.search, { backgroundColor: colors.surfaceAlt }]}>
@@ -100,7 +119,10 @@ export function ConversationList({ title, tabs, nativeOnly, initialTab = 'all', 
         data={rows}
         keyExtractor={r => r.conversation.id}
         renderItem={renderItem}
+        ListHeaderComponent={listHeader}
         ListEmptyComponent={empty}
+        windowSize={9}
+        initialNumToRender={12}
         contentContainerStyle={rows.length ? undefined : { flexGrow: 1 }}
         keyboardShouldPersistTaps="handled"
       />
@@ -140,16 +162,18 @@ export function ConversationList({ title, tabs, nativeOnly, initialTab = 'all', 
   );
 }
 
-const ConversationRow = memo(function ConversationRow({ row, demo, selected, onPress, onLongPress }: {
-  row: InboxRow; demo: boolean; selected: boolean; onPress: (id: string) => void; onLongPress: (c: Conversation) => void;
+const ConversationRow = memo(function ConversationRow({ row, contacts, demo, selected, typingName, onPress, onLongPress }: {
+  row: InboxRow; contacts: Contact[]; demo: boolean; selected: boolean; typingName?: string;
+  onPress: (id: string) => void; onLongPress: (c: Conversation) => void;
 }) {
   const { colors } = useTheme();
   const { conversation: c, last, unread } = row;
   const imported = c.origin === 'imported';
   const sender = last && c.kind === 'group' && !last.system ? `${last.senderId === 'me' ? 'You' : last.senderName.split(' ')[0]}: ` : last?.senderId === 'me' ? 'You: ' : '';
-  const label = `${c.title}${demo ? ', demo chat' : ''}${imported ? ', imported from ' + platformLabel(c.source) : ''}${unread ? `, ${unread} unread` : ''}. ${sender}${previewText(last)}`;
+  const label = `${c.title}${demo ? ', demo chat' : ''}${imported ? ', imported from ' + platformLabel(c.source) : ''}${unread ? `, ${unread} unread` : ''}. ${typingName ? `${typingName} is typing` : `${sender}${previewText(last)}`}`;
   return (
-    <Pressable
+    <PressableScale
+      scaleTo={0.98}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityHint="Opens the chat. Long-press for more options."
@@ -159,29 +183,36 @@ const ConversationRow = memo(function ConversationRow({ row, demo, selected, onP
       onPress={() => onPress(c.id)}
       onLongPress={() => onLongPress(c)}
       delayLongPress={350}
-      style={({ pressed }) => [styles.row, { backgroundColor: selected ? colors.accentSoft : pressed ? colors.surfaceAlt : 'transparent', borderLeftWidth: 3, borderLeftColor: selected ? colors.accent : 'transparent' }]}
+      style={[styles.row, { backgroundColor: selected ? colors.accentSoft : 'transparent', borderLeftColor: selected ? colors.accent : 'transparent' }]}
     >
-      <Avatar name={c.title} group={c.kind === 'group'} />
+      <ChatAvatar conv={c} contacts={contacts} />
       <View style={styles.rowBody}>
         <View style={styles.rowTop}>
-          <Txt variant="subheading" numberOfLines={1} style={{ flex: 1 }}>{c.title}</Txt>
-          <Txt variant="caption" color={unread ? 'accent' : 'textMuted'}>{formatListTime(c.lastActivityAt)}</Txt>
+          <Txt variant="subheading" numberOfLines={1} style={{ flex: 1, fontWeight: unread ? '700' : '600' }}>{c.title}</Txt>
+          <Txt variant="caption" color={unread ? 'accent' : 'textMuted'} style={unread ? { fontWeight: '700' } : undefined}>{formatListTime(c.lastActivityAt)}</Txt>
         </View>
         <View style={styles.rowTop}>
-          <Txt variant="small" color="textMuted" numberOfLines={1} style={{ flex: 1 }}>
-            {sender}{previewText(last)}
-          </Txt>
+          {typingName ? (
+            <Animated.View entering={FadeIn.duration(180)} style={{ flex: 1 }}>
+              <Txt variant="small" color="accent" numberOfLines={1} style={{ fontStyle: 'italic' }}>{`${typingName} is typing…`}</Txt>
+            </Animated.View>
+          ) : (
+            <Txt variant="small" color={unread ? 'text' : 'textMuted'} numberOfLines={1} style={{ flex: 1 }}>
+              {sender}{previewText(last)}
+            </Txt>
+          )}
           {c.muted ? <Ionicons name="notifications-off" size={14} color={colors.textMuted} /> : null}
           {c.pinned ? <Ionicons name="pin" size={14} color={colors.textMuted} /> : null}
           {unread ? (
-            <View style={[styles.unread, { backgroundColor: c.muted ? colors.textMuted : colors.accent }]}>
-              <Txt variant="caption" style={{ color: colors.onAccent, fontWeight: '700' }}>{unread > 99 ? '99+' : unread}</Txt>
-            </View>
+            // Keyed by count so the badge pops each time a new message lands.
+            <Animated.View key={unread} entering={ZoomIn.springify().damping(12)} style={[styles.unread, { backgroundColor: c.muted ? colors.textMuted : colors.accent }]}>
+              <Txt variant="caption" style={{ color: c.muted ? colors.surface : colors.onAccent, fontWeight: '700' }}>{unread > 99 ? '99+' : unread}</Txt>
+            </Animated.View>
           ) : null}
         </View>
         {demo ? <Tag label="Demo" /> : <SourceBadge source={c.source} imported={imported} />}
       </View>
-    </Pressable>
+    </PressableScale>
   );
 });
 
@@ -248,7 +279,8 @@ const styles = StyleSheet.create({
   search: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginHorizontal: space.lg, paddingHorizontal: space.md, borderRadius: radius.md, height: 44 },
   searchInput: { flex: 1, paddingVertical: 0 },
   chips: { gap: space.sm, paddingHorizontal: space.lg, paddingVertical: space.md },
-  row: { flexDirection: 'row', gap: space.md, paddingHorizontal: space.lg, paddingVertical: space.md, alignItems: 'flex-start' },
+  bigTitle: { flex: 1, fontSize: 32, lineHeight: 38, letterSpacing: -0.6 },
+  row: { flexDirection: 'row', gap: space.md, paddingHorizontal: space.lg, paddingVertical: space.md, alignItems: 'center', borderLeftWidth: 3, marginHorizontal: space.xs, borderRadius: radius.md },
   rowBody: { flex: 1, gap: 3 },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   unread: { minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center' },

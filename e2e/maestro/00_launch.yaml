@@ -1,0 +1,15 @@
+# Smoke test: Expo Go opens hye from Metro over USB (adb reverse).
+appId: host.exp.exponent
+name: 00 Launch hye in Expo Go
+tags:
+  - smoke
+env:
+  EXPO_URL: ${EXPO_URL || "exp://127.0.0.1:8082"}
+---
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      EXPO_URL: ${EXPO_URL}
+# Brand title on Welcome, or the Inbox if an account already exists.
+- assertVisible: "hye|Inbox"
+- takeScreenshot: 00_launched

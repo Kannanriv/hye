@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { Tabs } from 'expo-router';
-import { ComponentProps, useMemo, useState } from 'react';
+import { ComponentProps, useMemo } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -8,10 +8,14 @@ import { inboxRows, defaultFilters } from '@/state/selectors';
 import { useStore } from '@/state/store';
 import { space, type } from '@/theme/tokens';
 import { useIsWide, useTheme } from '@/theme/useTheme';
-import { ActionSheet, IconName, Txt } from './ui';
+import { IconName, Txt } from './ui';
 
 const ICONS: Record<string, [IconName, IconName]> = {
-  index: ['file-tray-full-outline', 'file-tray-full'],
+  index: ['chatbubble-ellipses-outline', 'chatbubble-ellipses'],
+  posts: ['sparkles-outline', 'sparkles'],
+  reels: ['play-circle-outline', 'play-circle'],
+  photos: ['images-outline', 'images'],
+  you: ['person-circle-outline', 'person-circle'],
   messages: ['chatbubbles-outline', 'chatbubbles'],
   communities: ['people-outline', 'people'],
   feed: ['newspaper-outline', 'newspaper'],
@@ -20,8 +24,8 @@ const ICONS: Record<string, [IconName, IconName]> = {
   settings: ['settings-outline', 'settings'],
 };
 
-/** Phones show the first four sections plus "More"; tablets and desktop show all seven in a sidebar. */
-const PHONE_PRIMARY = ['index', 'messages', 'communities', 'feed'];
+/** Phones show five primary tabs (everything else is reachable from You); tablets/desktop show all in a sidebar. */
+const PHONE_PRIMARY = ['index', 'posts', 'reels', 'photos', 'you'];
 
 // expo-router vendors React Navigation, so take the tab bar's props from Tabs itself.
 type BottomTabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0];
@@ -34,7 +38,6 @@ export function AppNavBar({ state, descriptors, navigateToTab }: BottomTabBarPro
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const store = useStore();
-  const [moreOpen, setMoreOpen] = useState(false);
   const unread = useMemo(() => inboxRows(store.state, { ...defaultFilters, tab: 'unread' }).length, [store.state]);
 
   const go = (name: string) => {
@@ -43,7 +46,7 @@ export function AppNavBar({ state, descriptors, navigateToTab }: BottomTabBarPro
   };
   const current = state.routes[state.index].name;
 
-  const item = (name: string, compact: boolean) => {
+  const item = (name: string, compact: boolean, dark = false) => {
     const focused = current === name;
     const label = descriptors[state.routes.find(r => r.name === name)!.key].options.title ?? name;
     const badge = name === 'index' && unread ? unread : 0;
@@ -62,11 +65,11 @@ export function AppNavBar({ state, descriptors, navigateToTab }: BottomTabBarPro
         ]}
       >
         <View>
-          <Ionicons name={ICONS[name][focused ? 1 : 0]} size={compact ? 24 : 22} color={focused ? colors.accent : colors.textMuted} />
+          <Ionicons name={ICONS[name][focused ? 1 : 0]} size={compact ? 24 : 22} color={dark ? (focused ? '#fff' : '#9AA3B5') : focused ? colors.accent : colors.textMuted} />
           {badge ? <View style={[styles.dot, { backgroundColor: colors.accent, borderColor: colors.surface }]} /> : null}
         </View>
         {rail ? null : (
-          <Txt variant={compact ? 'caption' : 'body'} color={focused ? 'accent' : 'textMuted'} style={{ fontWeight: focused ? '700' : '500' }}>
+          <Txt variant={compact ? 'caption' : 'body'} color={focused ? 'accent' : 'textMuted'} style={{ fontWeight: focused ? '700' : '500', ...(dark ? { color: focused ? '#fff' : '#9AA3B5' } : null) }}>
             {label}
           </Txt>
         )}
@@ -83,23 +86,11 @@ export function AppNavBar({ state, descriptors, navigateToTab }: BottomTabBarPro
     );
   }
 
-  const moreFocused = !PHONE_PRIMARY.includes(current);
+  // Reels is a full-bleed dark experience; the bar follows it.
+  const dark = current === 'reels';
   return (
-    <View style={[styles.bar, { backgroundColor: colors.surface, borderColor: colors.border, paddingBottom: Math.max(insets.bottom, space.sm) }]}>
-      {PHONE_PRIMARY.map(n => item(n, true))}
-      <Pressable accessibilityRole="tab" accessibilityLabel="More: Connections, Archive, Settings" accessibilityState={{ selected: moreFocused }} onPress={() => setMoreOpen(true)} style={styles.tab}>
-        <Ionicons name={moreFocused ? 'ellipsis-horizontal-circle' : 'ellipsis-horizontal-circle-outline'} size={24} color={moreFocused ? colors.accent : colors.textMuted} />
-        <Txt variant="caption" color={moreFocused ? 'accent' : 'textMuted'} style={{ fontWeight: moreFocused ? '700' : '500' }}>More</Txt>
-      </Pressable>
-      <ActionSheet
-        visible={moreOpen}
-        onClose={() => setMoreOpen(false)}
-        actions={[
-          { label: 'Connections', icon: 'link-outline', onPress: () => go('connections') },
-          { label: 'Archive', icon: 'archive-outline', onPress: () => go('archive') },
-          { label: 'Settings', icon: 'settings-outline', onPress: () => go('settings') },
-        ]}
-      />
+    <View style={[styles.bar, { backgroundColor: dark ? '#000' : colors.surface, borderColor: dark ? '#222' : colors.border, paddingBottom: Math.max(insets.bottom, space.sm) }]}>
+      {PHONE_PRIMARY.map(n => item(n, true, dark))}
     </View>
   );
 }

@@ -1,0 +1,13 @@
+# Start every journey from the Inbox: launch hye and sign up if signed out.
+appId: host.exp.exponent
+env:
+  USER_NAME: ${USER_NAME || "Maestro Tester"}
+---
+- runFlow: launch.yaml
+- runFlow:
+    when:
+      visible: "Get started"
+    file: create_account.yaml
+    env:
+      USER_NAME: ${USER_NAME}
+- assertVisible: "Inbox"

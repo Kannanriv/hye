@@ -1,13 +1,26 @@
 import { newId } from '@/domain/hash';
-import type { AppState, Contact, Conversation, Message, User } from '@/domain/types';
+import type { AppState, Contact, Conversation, Message, Post, User } from '@/domain/types';
+import { demoExtraChats } from '@/features/chats/demo';
+import { demoPhotoPosts } from '@/features/photos/demo';
+import { demoTextPosts } from '@/features/posts/demo';
+import { demoReels } from '@/features/reels/demo';
 
 // Simulated people for the prototype. Every one is flagged isDemo and labelled in the UI.
+const avatar = (n: number) => `https://i.pravatar.cc/300?img=${n}`;
+const person = (id: string, displayName: string, handle: string, img: number, bio: string, following = true): Contact =>
+  ({ id, displayName, handle, isDemo: true, avatarUrl: avatar(img), bio, following });
+
 export const DEMO_CONTACTS: Contact[] = [
-  { id: 'c_ava', displayName: 'Ava Chen', handle: 'ava', isDemo: true },
-  { id: 'c_rahul', displayName: 'Rahul Menon', handle: 'rahul', isDemo: true },
-  { id: 'c_maya', displayName: 'Maya Okafor', handle: 'maya', isDemo: true },
-  { id: 'c_leo', displayName: 'Leo Martins', handle: 'leo', isDemo: true },
-  { id: 'c_sara', displayName: 'Sara Ibrahim', handle: 'sara', isDemo: true },
+  person('c_ava', 'Ava Chen', 'ava', 47, 'Product designer · coffee snob · rooftop sunsets'),
+  person('c_rahul', 'Rahul Menon', 'rahul', 12, 'Building things in Bengaluru. Cricket on weekends.'),
+  person('c_maya', 'Maya Okafor', 'maya', 45, 'Trail runner 🏃🏾‍♀️ Photographer. Lagos → Lisbon.'),
+  person('c_leo', 'Leo Martins', 'leo', 13, 'Frontend dev. Mechanical keyboards. Bad puns.'),
+  person('c_sara', 'Sara Ibrahim', 'sara', 44, 'Baker of sourdough, reader of novels.'),
+  person('c_kenji', 'Kenji Watanabe', 'kenji', 59, 'Street photography · Tokyo nights', true),
+  person('c_priya', 'Priya Nair', 'priya', 32, 'Doctor by day, dancer by night 💃', true),
+  person('c_omar', 'Omar Haddad', 'omar', 52, 'Chef. Food is love made visible.', true),
+  person('c_zoe', 'Zoe Laurent', 'zoe', 25, 'Travel + film cameras. 34 countries and counting.', false),
+  person('c_dev', 'Dev Patel', 'dev', 68, 'Startup founder. Writing about AI and product.', false),
 ];
 
 export const DEMO_REPLIES = [
@@ -31,7 +44,15 @@ export const initialState: AppState = {
   privacy: { readReceipts: true, typingIndicators: true, lastSeen: 'contacts', defaultRetention: 'off' },
   notifications: { messages: true, groups: true, importComplete: true, previews: false },
   theme: 'system',
+  posts: [],
+  progress: { xp: 0, achievements: [], celebrated: [] },
+  delight: { haptics: true, celebrations: true, gamification: true },
 };
+
+/** Demo posts, photos and reels from simulated people. Every one is marked simulated. */
+export function demoPosts(now = Date.now()): Post[] {
+  return [...demoTextPosts(now), ...demoPhotoPosts(now), ...demoReels(now)];
+}
 
 function ago(minutes: number) {
   return new Date(Date.now() - minutes * 60_000).toISOString();
@@ -53,7 +74,7 @@ function msg(conversationId: string, senderId: string, senderName: string, text:
 }
 
 /** Seed the demo world for a freshly created account. */
-export function demoWorld(user: User): Pick<AppState, 'contacts' | 'conversations' | 'messages'> {
+export function demoWorld(user: User): Pick<AppState, 'contacts' | 'conversations' | 'messages' | 'posts'> {
   const conversations = [
     conv('cv_ava', 'Ava Chen', 'direct', ['c_ava'], ago(4), { pinned: true, lastReadAt: ago(30) }),
     conv('cv_rahul', 'Rahul Menon', 'direct', ['c_rahul'], ago(95)),
@@ -75,5 +96,6 @@ export function demoWorld(user: User): Pick<AppState, 'contacts' | 'conversation
     msg('cv_design', 'c_leo', 'Leo Martins', 'Uploaded the new onboarding flow.', 60 * 26),
     msg('cv_sara', 'c_sara', 'Sara Ibrahim', 'Old thread, archived on purpose.', 60 * 24 * 9),
   ];
-  return { contacts: DEMO_CONTACTS, conversations, messages };
+  const extra = demoExtraChats(user, Date.now());
+  return { contacts: DEMO_CONTACTS, conversations: [...conversations, ...extra.conversations], messages: [...messages, ...extra.messages], posts: demoPosts() };
 }

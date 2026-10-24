@@ -1,0 +1,31 @@
+# From the Welcome intro, create an account with valid details.
+# Params: USER_NAME, USER_HANDLE, USER_EMAIL (defaults below).
+appId: host.exp.exponent
+env:
+  USER_NAME: ${USER_NAME || "Maestro Tester"}
+  USER_HANDLE: ${USER_HANDLE || "maestro_tester"}
+  USER_EMAIL: ${USER_EMAIL || "maestro@example.com"}
+---
+- runFlow:
+    when:
+      visible: "Get started"
+    commands:
+      - tapOn: "Get started"
+- assertVisible: "Create your account"
+
+# Fields are found by their placeholder (hint) text: the visible label and the
+# input's accessibilityLabel share the same words, the placeholder is unique.
+- tapOn: "How people will see you"
+- inputText: ${USER_NAME}
+- tapOn: "e.g. kannan"
+- inputText: ${USER_HANDLE}
+- tapOn: "name@example.com"
+- inputText: ${USER_EMAIL}
+- hideKeyboard
+- scrollUntilVisible:
+    element: "Create account"
+    timeout: 5000
+- tapOn: "Create account"
+- extendedWaitUntil:
+    visible: "Inbox"
+    timeout: 15000

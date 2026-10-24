@@ -1,0 +1,5 @@
+# Open a tab hidden under "More" on phones. Param: TAB = Connections | Archive | Settings
+appId: host.exp.exponent
+---
+- tapOn: "More: Connections, Archive, Settings"
+- tapOn: ${TAB}
